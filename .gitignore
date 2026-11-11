@@ -1,0 +1,16 @@
+build/
+install/
+out/
+.vs/
+.cache/
+vcpkg_installed/
+compile_commands.json
+CMakeUserPresets.json
+*.user
+_ref/
+*.ini.bak
+build-*.log
+
+# release binaries and captures (rebuilt / shared outside the repo)
+dist/**/*.dll
+shots/*.mp4

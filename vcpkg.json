@@ -1,0 +1,16 @@
+{
+    "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+    "name": "groundfog",
+    "version-string": "0.2.0",
+    "description": "Reactive ground fog SKSE plugin.",
+    "supports": "windows & x64",
+    "builtin-baseline": "dddca6fa87f177e0678e2545c4b4636a44aa05bd",
+    "dependencies": [
+        "directxmath",
+        "directxtk",
+        "fmt",
+        "rapidcsv",
+        "spdlog",
+        "xbyak"
+    ]
+}
