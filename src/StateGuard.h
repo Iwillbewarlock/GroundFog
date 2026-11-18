@@ -7,7 +7,7 @@
 class StateGuard
 {
 public:
-	static constexpr UINT kSrvSlots = 6;  // t0..t5 on VS and PS (t4: the tall fog layer, t5: the coarse grid)
+	static constexpr UINT kSrvSlots = 8;  // t0..t7 on VS and PS (t4: the tall fog layer, t5: the coarse grid, t6: the land table, t7: the relief)
 	static constexpr UINT kCbSlots = 1;   // b0 on VS and PS
 
 	struct Snapshot

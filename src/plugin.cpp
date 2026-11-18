@@ -7,6 +7,7 @@
 #include "SelfTest.h"
 #include "WindField.h"
 #include "Settings.h"
+#include "Menu.h"
 
 namespace
 {
@@ -25,6 +26,17 @@ namespace
 		spdlog::set_pattern("[%H:%M:%S.%e] [%l] %v");
 	}
 
+	bool g_running = false;   // hooks installed at load (Enable was 1)
+
+	// With Enable = 0 at load only the settings page is registered: nothing else is installed (Codex review 2026-11-17:
+	// the page vanished with it, so it could not switch the fog back on).
+	void OnMessageOff(SKSE::MessagingInterface::Message* a_msg)
+	{
+		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
+			Menu::Register(false);
+		}
+	}
+
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
 		switch (a_msg->type) {
@@ -35,6 +47,7 @@ namespace
 			}
 			WeatherFog::Build();
 			SelfTest::ReportLoad();
+			Menu::Register(g_running);
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
@@ -48,7 +61,7 @@ namespace
 }
 
 SKSEPluginInfo(
-	.Version = REL::Version{ 0, 2, 0, 0 },
+	.Version = REL::Version{ 0, 3, 0, 0 },
 	.Name = "GroundFog"sv,
 	.RuntimeCompatibility = SKSE::VersionIndependence::AddressLibrary)
 
@@ -61,7 +74,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 		return false;
 	}
 	SKSE::Init(a_skse, false);  // false: keep our own log set up above
-	logger::info("GroundFog 0.2.0 loading on runtime {}", a_skse->RuntimeVersion().string());
+	logger::info("GroundFog 0.3.0 loading on runtime {}", a_skse->RuntimeVersion().string());
 
 	Settings::Load();
 	if (Settings::enable) {
@@ -71,9 +84,13 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 	Settings::LogAll();
 	if (!Settings::enable) {
-		logger::info("Enable=0 in GroundFog.ini: nothing installed");
+		logger::info("Enable=0 in GroundFog.ini: nothing installed but the settings page");
+		if (auto* messaging = SKSE::GetMessagingInterface()) {
+			messaging->RegisterListener(OnMessageOff);
+		}
 		return true;
 	}
+	g_running = true;
 
 	Hooks::Install();
 	WindField::Install();

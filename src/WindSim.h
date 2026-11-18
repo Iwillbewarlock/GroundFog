@@ -15,11 +15,16 @@
 class WindSim
 {
 public:
-	bool Create(ID3D11Device* a_device, int a_resolution, std::string& a_error);
-	static std::vector<ShaderCache::Job> ShaderJobs();   // what Create compiles, for the background compile
+	// a_fogSampling: [Wind] FogSampling, how CSAdvectFog reads the carried fog (0 = bilinear, 1 = Catmull-Rom held to the
+	// 4 nearest texels, on the thin side only and only in air a body drags; WindShaders.h). It is compiled in, so a
+	// change needs Create again.
+	bool Create(ID3D11Device* a_device, int a_resolution, std::string& a_error, int a_fogSampling = 0);
+	static std::string                   Source(int a_fogSampling);          // the shader text Create compiles
+	static std::vector<ShaderCache::Job> ShaderJobs(int a_fogSampling = 0);   // what Create compiles, for the background compile
 	void Release();
 	[[nodiscard]] bool Ready() const { return _ready; }
 	[[nodiscard]] int  Resolution() const { return _res; }
+	[[nodiscard]] int  FogSampling() const { return _fogSampling; }
 
 	// Sets velocity 0, pressure 0, fog (rho 1, delta 0).
 	void Reset(ID3D11DeviceContext* a_ctx);
@@ -38,6 +43,10 @@ public:
 	// The tall layer (steam, pooled fog): H, W per texel, same grid as the columns.
 	[[nodiscard]] ID3D11ShaderResourceView* UpperSrv() const { return _upper.srv; }
 	[[nodiscard]] ID3D11Texture2D*          UpperTexture() const { return _upper.tex; }
+	// The column height factor's departure s - 1 per texel (CSColumn's height response; 0 while it is off), same grid,
+	// for the composite's relief shading.
+	[[nodiscard]] ID3D11ShaderResourceView* ReliefSrv() const { return _relief.srv; }
+	[[nodiscard]] ID3D11Texture2D*          ReliefTexture() const { return _relief.tex; }
 
 	// Fog columns for the raymarch from the current fog field and the height texture (see CSColumn).
 	// a_place: PlacementRules grid at the height texture's size (nullptr = none); a_placeParams: PlaceCB
@@ -46,7 +55,7 @@ public:
 		float a_travelX, float a_travelY, ID3D11ShaderResourceView* a_place = nullptr, std::array<float, 4> a_placeParams = { 1.0f, 0.0f, 1.0f, 0.0f },
 		std::array<float, 4> a_steamParams = { 0.0f, 0.0f, 0.0f, 0.0f },   // SteamP: evaporation, steam height, steam density, pool density
 		std::array<float, 4> a_placeGrid = { 0.0f, 0.0f, 0.0f, 0.0f },     // PlaceG: placement texture origin x, y, cell, size (cell 0 = height grid)
-		std::array<float, 4> a_look = { 0.0f, 0.0f, 0.0f, 0.0f },          // LookP: wisp amount, region value (RegionRules)
+		std::array<float, 4> a_look = { 0.0f, 0.0f, 0.0f, 0.0f },          // LookP: wisp amount, region value (RegionRules), height response (SurfaceResponse)
 		ID3D11ShaderResourceView* a_coarse = nullptr,                        // coarse pools (ground, depth), RG32F
 		std::array<float, 4> a_coarseGrid = { 0.0f, 0.0f, 0.0f, 0.0f },    // CoarseG: origin x, y, cell, size
 		std::array<float, 4> a_coarseParams = { 0.0f, 0.0f, 0.0f, 0.0f }); // CoarseP: ground tolerance, depth limit
@@ -95,10 +104,12 @@ private:
 	Target              _wall{};
 	Target              _column{};
 	Target              _upper{};   // R32G32: tall layer H, W
+	Target              _relief{};  // R16: column height factor - 1 (CSColumn OutRelief)
 	int                 _velCur{ 0 };
 	int                 _fogCur{ 0 };
 	int                 _pressureCur{ 0 };
 	int                 _res{ 0 };
+	int                 _fogSampling{ 0 };
 	bool                _ready{ false };
 	WindShaders::SimCB  _lastCb{};
 };

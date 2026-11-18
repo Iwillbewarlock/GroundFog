@@ -8,8 +8,8 @@
 // Fog: one scalar, the fog amount rho (1 = the undisturbed layer), carried by the air like Stam's smoke
 // density and diluted by the continuity equation, D(rho)/Dt = -rho div(u), with div(u) the divergence source
 // the projection is given. It is stored as its departure from the equilibrium pattern rho_eq (EqFog), see CSAdvectFog.
-// Impacts and runners are divergence sources shaped as a Ricker function (the Laplacian of a Gaussian), whose
-// integral over the plane is zero.
+// Impacts and moving bodies are divergence sources shaped as a Ricker function (the Laplacian of a Gaussian), whose
+// integral over the plane is zero; fire also removes fog (Evaporation).
 // Per frame: shift (when the grid moves) -> walls -> curl -> forces -> advect velocity -> divergence ->
 // pressure (Jacobi) -> subtract gradient -> advect fog. Projection is last, so fog and every reader use the
 // same projected velocity.
@@ -22,6 +22,23 @@ namespace WindShaders
 	// Upper bound of the fog amount (numerical safety against pile-up at inflow rings). The renderer's largest
 	// optical thickness is derived from the same number (FogRenderer.cpp wMax). Must match kMaxFog in the shader.
 	inline constexpr float kMaxFogCpp = 2.0f;
+	// Column height response (CSColumn, LookP.z = SurfaceResponse; judge's plan r11 step 1a, design A r07): the low
+	// layer's column height is baseH x s, s = (rho / rho_eq)^SurfaceResponse held to these bounds; W keeps its formula.
+	// Must match kSurfaceMin / kSurfaceMax in the shader.
+	inline constexpr float kSurfaceMinCpp = 0.15f;
+	inline constexpr float kSurfaceMaxCpp = 1.6f;
+	// Highest the low layer's top stands over the ground (units): Thickness, x kSurfaceMaxCpp while the height response
+	// is on. FogRenderer's march box top and RaymarchCheck's crest check use this one expression.
+	// Banks (ini [Render] BankAmount, 0 = off): the layer thicker and thinner over thousands of units, after roxorvic's
+	// Community Shaders fog (skyrim-community-shaders fluid-field/fog-v3, GroundFogCS.hlsl Banks: 8000-unit noise, 0.45 to
+	// 1.3 x; GPL-3.0, used with permission). kBankHigh bounds the march box.
+	inline constexpr float kBankLowCpp = 0.45f;
+	inline constexpr float kBankHighCpp = 1.3f;
+	inline float LowLayerTop(float a_thickness, float a_surfaceResponse, float a_bankAmount = 0.0f)
+	{
+		const float bank = a_bankAmount > 0.0f ? 1.0f + a_bankAmount * (kBankHighCpp - 1.0f) : 1.0f;
+		return a_thickness * (a_surfaceResponse > 0.0f ? kSurfaceMaxCpp : 1.0f) * bank;
+	}
 
 	// Must match cbuffer SimCB.
 	struct alignas(16) SimCB
@@ -30,21 +47,31 @@ namespace WindShaders
 		float time[4];       // x = dt, y = field time (s, stops while paused; the same clock as CSColumn's Iter.y), z, w = base wind travel (world units)
 		float wind[4];       // xy = base wind (units/s), z = relax toward it (1/s), w = vorticity
 		float gust[4];       // x = gust strength (units/s), y = gust wavelength (units), z = fog refill toward equilibrium (1/s), w = velocity dissipation (1/s)
-		float shift[4];      // xy = texel shift (new = old[x + sx, y + sy]), z unused, w = height grid size
+		float shift[4];      // xy = texel shift (new = old[x + sx, y + sy]), z = the frame's field time (s, time.x x steps; WakeDose), w = height grid size
 		float counts[4];     // x = drags, y = blasts, z = wall rise threshold (units per unit), w = wisp amount of the equilibrium pattern (0 = uniform)
 		float heightGrid[4]; // x, y = height grid origin, z = height cell, w = 1 if heights are bound
 		float drags[kMaxDrags][4];     // xy = position, zw = velocity
-		float dragParams[4];           // x = radius, y = follow rate (1/s), z = push per unit of speed (1/unit, 0 = off), w = speed where the push starts (units/s)
+		float dragSize[kMaxDrags][4];  // x = 1 / radius^2 (the body's own radius), y = push per unit of speed (1/unit, 0 = off), z = distance the body really moved this frame (units, WakeDose), w = length of its straight run so far, this frame included (units)
+		float dragParams[4];           // x = share of the push a walker already gets (0..1), y = follow rate (1/s, at the body's centre), z = WakeEvaporate / steps this frame (0 = no wake), w = speed where the running push starts (units/s)
 		float blasts[kMaxBlasts][4];   // xy = position, z = 1 / radius^2, w = divergence source rate now (1/s)
-		float blastKicks[kMaxBlasts][4]; // xy = acceleration along the hit direction now (units/s^2), zw unused
+		float blastKicks[kMaxBlasts][4]; // xy = acceleration along the hit direction now (units/s^2), z = evaporation rate now (1/s, a fire hit), w unused
 	};
-	static_assert(sizeof(SimCB) == 16 * (7 + kMaxDrags + 1 + 2 * kMaxBlasts));
+	// The same rows in the same order as the shader's cbuffer SimCB below: 1536 bytes.
+	static_assert(sizeof(SimCB) == 16 * (7 + 2 * kMaxDrags + 1 + 2 * kMaxBlasts));
 
 	inline constexpr const char* kSource = R"(
 #define MAX_DRAGS 32
 #define MAX_BLASTS 12
 
 static const float kMaxFog = 2.0;   // WindShaders::kMaxFogCpp
+// Column height response (CSColumn): s = q^LookP.z held to kSurfaceMin..kSurfaceMax (WindShaders::kSurfaceMinCpp,
+// kSurfaceMaxCpp), q = rho / rho_eq where rho_eq is over kSurfaceEqMin, faded out from kSurfaceFadeStart to
+// kSurfaceFadeEnd units from the field centre (past 1500 a march step at a level ray is wider than a lane: design A r07).
+static const float kSurfaceMin = 0.15;   // = kShapeFloor
+static const float kSurfaceMax = 1.6;    // a runner's banks 1.12, an explosion's rim 1.63 (WindRules.h)
+static const float kSurfaceEqMin = 0.05;
+static const float kSurfaceFadeStart = 1500.0;
+static const float kSurfaceFadeEnd = 2500.0;
 
 cbuffer SimCB : register(b0)
 {
@@ -56,6 +83,7 @@ cbuffer SimCB : register(b0)
 	float4 Counts;
 	float4 HeightGrid;
 	float4 Drags[MAX_DRAGS];
+	float4 DragSize[MAX_DRAGS];
 	float4 DragParams;
 	float4 Blasts[MAX_BLASTS];
 	float4 BlastKicks[MAX_BLASTS];
@@ -70,7 +98,8 @@ cbuffer PlaceCB : register(b2)
 	float4 PlaceG;   // the placement texture's own grid: origin x, y, cell, size (cell 0 = the height grid's); it may lag
 	                 // the height grid by a few frames while a newer build runs on the worker thread
 	float4 LookP;    // x = wisp amount (0 = none): fine structure in the low layer's W; y = region value added to the
-	                 // placement multiplier (RegionRules: the player's weather region)
+	                 // placement multiplier (RegionRules: the player's weather region); z = column height response
+	                 // (SurfaceResponse, 0 = off: the height from the shape alone); w = BankAmount (0 = off)
 	float4 CoarseG;  // coarse pool texture (InCoarse) grid: origin x, y, cell, size (cell 0 = none)
 	float4 CoarseP;  // x = ground tolerance (units): coarse pools fade where the fine ground leaves the coarse one by this
 };
@@ -99,6 +128,7 @@ RWTexture2D<float>  OutScalar: register(u2);
 RWTexture2D<float>  OutDiv   : register(u3);
 RWTexture2D<float4> OutAny   : register(u4);
 RWTexture2D<float2> OutUpper : register(u5);   // CSColumn: the tall layer (steam and pooled fog), H x known and W x known
+RWTexture2D<float>  OutRelief: register(u6);   // CSColumn: the height factor's departure s - 1, x known (relief shading)
 
 static const float kKnownLimit = -1.0e29;
 
@@ -158,6 +188,20 @@ float EqFog(float2 world, float2 travel, float time, float amount)
 static const float kShapeFloor = 0.15;
 static const float kShapeContrast = 1.8;
 static const float kShapeLevel = 0.62;   // noise value that maps to mid-height: most of the layer is low, with mounds
+
+// Banks (LookP.w = BankAmount, 0 = off): one octave of value noise 8000 units across (much wider than the shape's
+// 900), drifting slowly, scaling the layer between kBankLow and kBankHigh x, blended in by the amount. RaymarchShaders.h
+// FarBank is the same function: keep them identical (the far tier continues the near layer).
+static const float kBankSpan = 8000.0;
+static const float kBankLow = 0.45;    // WindShaders::kBankLowCpp
+static const float kBankHigh = 1.3;    // WindShaders::kBankHighCpp
+
+float BankFactor(float2 q, float time, float amount)
+{
+	if (!(amount > 0.0)) return 1.0;
+	const float n = ValueNoise(q / kBankSpan + time * float2(0.0006, 0.0004));
+	return 1.0 + amount * (lerp(kBankLow, kBankHigh, n) - 1.0);
+}
 
 float LayerShape(float2 q, float time)
 {
@@ -259,11 +303,13 @@ void CSForce(uint3 id : SV_DispatchThreadID)
 	grad /= length(grad) + 1e-5;
 	v += Wind.w * InCurl[p] * float2(grad.y, -grad.x) * Grid.z * dt;
 
-	// Actors pull the air along with them.
+	// Actors pull the air along with them: the air at a body takes the body's speed at DragParams.y per second.
+	// 1 - exp(-rate dt) is that pull over a step of any length (rate x dt, as it was, pulled 6 % harder at 30
+	// frames a second than at 60 and 21 % harder at 15, and the wake differed with the frame rate).
 	for (int i = 0; i < (int)Counts.x; ++i) {
 		const float2 d = world - Drags[i].xy;
-		const float  w = exp(-dot(d, d) / (DragParams.x * DragParams.x));
-		v = lerp(v, Drags[i].zw, saturate(w * DragParams.y * dt));
+		const float  w = exp(-dot(d, d) * DragSize[i].x);
+		v = lerp(v, Drags[i].zw, 1.0 - exp(-w * DragParams.y * dt));
 	}
 
 	// Impacts carry momentum: an acceleration along the hit direction, spread as a Gaussian at the impact
@@ -349,25 +395,71 @@ void CSAdvectVel(uint3 id : SV_DispatchThreadID)
 // Divergence source (1/s): where it is positive the air spreads out and the fog thins, where it is negative
 // the air converges and the fog piles up.
 //  - Impacts: a Ricker of the impact's radius at the rate the CPU gives for this frame (a pulse in time).
-//  - Running actors: a Ricker of the drag radius, rate = z x speed. The fog amount lost on a straight path
+//  - Moving actors: a Ricker of the body's radius R, rate = z x speed. The fog amount lost on a straight path
 //    through the centre is then z x speed x (sqrt(pi) R / 2) / speed = z sqrt(pi) R / 2, whatever the speed;
-//    the CPU sets z so that this is the ActorPush setting. Below DragParams.w (walking) there is no push, it
-//    is full at 1.5 x that speed.
+//    the CPU sets z per body (DragSize.y) so that this is the ActorPush setting (more for a wide body,
+//    WindRules::SetDrag). The push comes in two parts: the share DragParams.x fades in from 0.18 to 0.36 x
+//    DragParams.w (a walker's trace; about 40 to 79 at 220), the rest from DragParams.w to 1.5 x it (running), so a
+//    walker never gets more than that share and nobody more than the whole.
 float Source(float2 world)
 {
 	float s = 0.0;
 	for (int k = 0; k < (int)Counts.y; ++k) {
 		s += Blasts[k].w * Ricker(world - Blasts[k].xy, Blasts[k].z);
 	}
-	if (DragParams.z > 0.0) {
-		const float invR2 = 1.0 / (DragParams.x * DragParams.x);
-		for (int i = 0; i < (int)Counts.x; ++i) {
-			const float speed = length(Drags[i].zw);
-			const float gate = smoothstep(DragParams.w, DragParams.w * 1.5, speed);
-			s += DragParams.z * speed * gate * Ricker(world - Drags[i].xy, invR2);
-		}
+	const float run = max(DragParams.w, 1.0);
+	for (int i = 0; i < (int)Counts.x; ++i) {
+		const float speed = length(Drags[i].zw);
+		const float gate = DragParams.x * smoothstep(0.18 * run, 0.36 * run, speed) + (1.0 - DragParams.x) * smoothstep(run, 1.5 * run, speed);
+		s += DragSize[i].y * speed * gate * Ricker(world - Drags[i].xy, DragSize[i].x);
 	}
 	return s;
+}
+
+// Fog a fire boils off (1/s): a Gaussian on the impact's footprint, at the rate the CPU gives for this frame. It is
+// a sink of the fog amount only (CSAdvectFog); the air is not asked to move for it, so nothing piles up on a rim.
+float Evaporation(float2 world)
+{
+	float s = 0.0;
+	for (int k = 0; k < (int)Counts.y; ++k) {
+		const float2 d = world - Blasts[k].xy;
+		s += BlastKicks[k].z * exp(-dot(d, d) * Blasts[k].z);
+	}
+	return s;
+}
+
+// Wake evaporation (ini [Wind] WakeEvaporate; DEBUG-LEDGER.md 2026-11-14 15:xx): the turbulent wake behind a moving body
+// mixes the drier air over the layer down into it and droplets evaporate. Not a rate: each frame a body gives the fog
+// behind it the dose of the path it moved through the air there, so a parcel of air on its path gets e x gate in all (the
+// centre line; a Gaussian of the body's radius across), whatever the frame rate or the clamped field time, and nothing
+// once the body is gone; air carried along with the body collects no more for it (DEBUG-LEDGER.md 2026-11-14 15:xx (2)).
+//   dose = gate x exp(-c^2 / R^2) x (S(b) - S(b - L_rel)) for b <= run, S(b) = smoothstep(0.5 R, 2 R, b),
+//   L_rel = max(0, L - (u_air . heading) x Shift.z),
+// b = distance behind the body along its heading, c = across it, L = DragSize.z (the distance it moved this frame, real
+// time), u_air = a_vel (this step's air velocity here), Shift.z = the frame's field time, run = DragSize.w (its straight
+// run so far, over the ground; nothing behind where that run began). A parcel's b grows by L_rel a frame, so its doses add
+// up to S(b now) - S(b at the start) <= 1 (WindRules::WakeDose is the same on the CPU).
+// CSAdvectFog thins rho by exp(-DragParams.z x WakeDose) every step, DragParams.z = WakeEvaporate / steps, but the wake
+// alone never takes it under kWakeFloor x rho_eq (paths crossed again and again; the push has no such floor).
+static const float kWakeFloor = 0.15;   // WindRules::kWakeFloor
+float WakeDose(float2 world, float2 a_vel)
+{
+	float dose = 0.0;
+	const float run = max(DragParams.w, 1.0);
+	for (int i = 0; i < (int)Counts.x; ++i) {
+		const float step = DragSize[i].z;
+		const float speed = length(Drags[i].zw);
+		if (!(step > 0.0) || speed < 1.0) continue;
+		const float2 d = world - Drags[i].xy;
+		const float  b = -dot(d, Drags[i].zw / speed);
+		if (b > DragSize[i].w) continue;
+		const float R = rsqrt(DragSize[i].x);
+		const float gate = DragParams.x * smoothstep(0.18 * run, 0.36 * run, speed) + (1.0 - DragParams.x) * smoothstep(run, 1.5 * run, speed);
+		const float c2 = max(dot(d, d) - b * b, 0.0);
+		const float rel = max(step - dot(a_vel, Drags[i].zw / speed) * Shift.z, 0.0);
+		dose += gate * exp(-c2 * DragSize[i].x) * (smoothstep(0.5 * R, 2.0 * R, b) - smoothstep(0.5 * R, 2.0 * R, b - rel));
+	}
+	return dose;
 }
 
 // Central-difference divergence of InVel at p; a wall neighbour contributes zero velocity.
@@ -439,8 +531,68 @@ void CSSubtract(uint3 id : SV_DispatchThreadID)
 // div(u) is the prescribed source (Source): the projection is asked for exactly that divergence. Measuring it
 // on the projected velocity instead was tried and dropped (offline checks 2026-11-10): what 20 Jacobi sweeps
 // leave undone then shows up as fog, e.g. a walker's drag opened a 25 % hole and a cliff face emptied the fog
-// in front of it. The refill pulls rho back to rho_eq (implicit step, stable for any dt).
+// in front of it. A fire's evaporation (Evaporation) is a second sink, with no air movement asked for it.
+// The refill pulls rho back to rho_eq (implicit step, stable for any dt).
 // Output: x = rho (what CSColumn reads), y = delta (the carried state).
+//
+// [Wind] FogSampling (WindSim::Create puts "#define FOG_SAMPLING 1" in front of this source; 0 or absent = bilinear,
+// the code as it was). The bilinear resampling mixes in the neighbours across the flow whenever the flow is not along
+// a grid axis, so a runner's trail, carried along itself by the air the runner drags, filled in on diagonal headings
+// (mean q on the trail 0.35 along an axis, 0.66 at 45 degrees; DEBUG-LEDGER.md 2026-11-15). 1 reads delta with a
+// Catmull-Rom 4 x 4 instead and holds the result to the range of the 4 nearest texels, so no new high or low appears.
+// Only the thin side is sharpened: where the result is above the pattern (delta > 0: the banks beside a trail, the
+// crests of gusts) it is not let above max(the bilinear value, 0), because the sharper read left the banks higher too (s 1.36
+// against 1.19 beside a runner; ledger 2026-11-15). Any wall texel among the 16 -> the bilinear no-wall sample, as
+// before. And only in air a body drags: the sharper value is blended in by how far the air's velocity is from the
+// base wind, from kSharpFrom to kSharpFull units/s (the air behind a runner moves at 120 to 190). With the default
+// gust settings gusts alone stay under kSharpFrom, so fog that only the wind and its gusts move is read exactly as
+// before (measured at wind 57, GustMinimum 40: identical over 30 s); a large GustAmount with a strong wind, or the
+// seconds after the wind changes, can pass it, and the sharper read then takes part there too. Limits: not conservative
+// (neither is the bilinear one), and capping one side only loses a little fog on a trail (the offline tool compares
+// the grid mean); 16 reads in place of 4 where the air is dragged.
+#ifndef FOG_SAMPLING
+#define FOG_SAMPLING 0
+#endif
+#if FOG_SAMPLING == 1
+static const float kSharpFrom = 60.0;
+static const float kSharpFull = 110.0;
+
+float4 CatmullRom(float t)
+{
+	const float t2 = t * t, t3 = t2 * t;
+	return float4(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
+}
+
+float SampleDeltaCubic(float2 texel, float fallback, float2 vel)
+{
+	const float sharp = smoothstep(kSharpFrom, kSharpFull, length(vel - Wind.xy));
+	if (sharp <= 0.0) return SampleFogNoWall(texel, float2(0.0, fallback)).y;
+	const float2 b = floor(texel);
+	const float2 f = texel - b;
+	const float4 wx = CatmullRom(f.x), wy = CatmullRom(f.y);
+	float sum = 0.0, bil = 0.0;
+	float lo = 1.0e30, hi = -1.0e30;
+	bool  wall = false;
+	[unroll] for (int j = 0; j < 4; ++j) {
+		[unroll] for (int i = 0; i < 4; ++i) {
+			const int2 cc = clamp(int2(b) + int2(i - 1, j - 1), 0, (int)Res() - 1);
+			if (InWall[cc] > 0.5) wall = true;
+			const float d = InFog[cc].y;
+			sum += d * wx[i] * wy[j];
+			if ((i == 1 || i == 2) && (j == 1 || j == 2)) {   // the 4 texels the bilinear sample reads
+				lo = min(lo, d);
+				hi = max(hi, d);
+				bil += d * (i == 1 ? 1.0 - f.x : f.x) * (j == 1 ? 1.0 - f.y : f.y);
+			}
+		}
+	}
+	if (wall) return SampleFogNoWall(texel, float2(0.0, fallback)).y;
+	float v = clamp(sum, lo, hi);
+	if (v > 0.0) v = min(v, max(bil, 0.0));
+	return lerp(bil, v, sharp);
+}
+#endif
+
 [numthreads(8, 8, 1)]
 void CSAdvectFog(uint3 id : SV_DispatchThreadID)
 {
@@ -450,7 +602,11 @@ void CSAdvectFog(uint3 id : SV_DispatchThreadID)
 	if (InWall[p] > 0.5) { OutFog[p] = float2(1, 0); return; }
 	const float2 vel = InVel[p];
 	const float2 from = TraceBack(float2(p), vel);
+#if FOG_SAMPLING == 1
+	float delta = SampleDeltaCubic(from, InFog[p].y, vel);
+#else
 	float delta = SampleFogNoWall(from, InFog[p]).y;
+#endif
 
 	const float2 world = ToWorld(float2(p));
 	const float  eq = EqFog(world, Time.zw, Time.y, Counts.w);
@@ -460,8 +616,13 @@ void CSAdvectFog(uint3 id : SV_DispatchThreadID)
 		                           EqFog(world + float2(0, e), Time.zw, Time.y, Counts.w) - EqFog(world - float2(0, e), Time.zw, Time.y, Counts.w)) / (2.0 * e);
 		delta -= dot(vel - Wind.xy, grad) * dt;
 	}
-	const float rho = clamp((eq + delta) * exp(-Source(world) * dt), 0.0, kMaxFog);
-	delta = (rho - eq) / (1.0 + Gust.z * dt);
+	const float rho = clamp((eq + delta) * exp(-(Source(world) + Evaporation(world)) * dt), 0.0, kMaxFog);
+	float rhoAfter = rho;
+	if (DragParams.z > 0.0) {   // wake evaporation (WakeDose), held at the floor; off: rho as it was
+		const float wakeFloor = kWakeFloor * eq;
+		if (rho > wakeFloor) rhoAfter = max(rho * exp(-DragParams.z * WakeDose(world, vel)), wakeFloor);
+	}
+	delta = (rhoAfter - eq) / (1.0 + Gust.z * dt);
 	OutFog[p] = float2(eq + delta, delta);
 }
 
@@ -493,19 +654,37 @@ void CSColumn(uint3 id : SV_DispatchThreadID)
 		}
 	}
 	// Fog amount from the wind field (CSAdvectFog): 1 = the undisturbed layer, banks and gaps included.
-	const float  rho = InFog[p].x;
+	const float2 fogS = InFog[p];   // x = rho, y = rho - rho_eq
+	const float  rho = fogS.x;
 	const float  shape = LayerShape(world - Iter.zw, Iter.y);
 	// Round fade around the field centre (the player): full fog to 55% of the half size, none from 95%. A square
 	// 8% edge showed as a straight wall about 29 m ahead in the Blender look render (2026-11-07).
 	const float  r = length(ToUv(float2(p)) - 0.5) * 2.0;
 	const float  edge = 1.0 - smoothstep(0.55, 0.95, r);
-	const float  baseH = Iter.x * shape;
-	// The column's height comes from the shape alone; the fog amount only scales its optical thickness
-	// (W is the column's mass, W = integral of density over height, so W is proportional to rho). The march box
-	// can then be sized from the shape's maximum. The round edge fades the density only, keeping the height, so
+	const float  baseH = Iter.x * shape * BankFactor(world - Iter.zw, Iter.y, LookP.w);
+	// Height response (LookP.z = SurfaceResponse k; judge's plan r11 step 1a, design A r07): where the air has thinned or
+	// piled up the fog relative to its pattern, q = rho / rho_eq (rho_eq = x - y exactly, CSAdvectFog), the column is
+	// that much lower or higher, s = q^k: a runner leaves a trough with banks, a hit a bowl. Radiation fog is a thin cold
+	// layer whose depth, not its density, changes when it is pushed aside (the continuity equation of CSAdvectFog is the
+	// shallow-water depth equation). Gusts move q too, so in wind the top undulates with nobody near (measured std(q)
+	// 0.05 on flat ground, 0.15 beside a cliff; accepted by the user 2026-11-14). It fades with the round edge (the far
+	// tier continues the undisturbed layer) and from 1500 to 2500 units from the field centre. k = 0: s = 1, as before.
+	const float  eqv = fogS.x - fogS.y;
+	const float  q = eqv > kSurfaceEqMin ? fogS.x / eqv : 1.0;
+	const float  reach = 1.0 - smoothstep(kSurfaceFadeStart, kSurfaceFadeEnd, length(world - (Grid.xy + 0.5 * Grid.w * Grid.z)));
+	const float  s = LookP.z > 0.0 ? lerp(1.0, clamp(pow(max(q, 1e-4), LookP.z), kSurfaceMin, kSurfaceMax), edge * reach) : 1.0;
+	// The column's height comes from the shape (and the height response); the fog amount scales its optical
+	// thickness (W is the column's mass, W = integral of density over height, so W is proportional to rho). W keeps
+	// its formula with baseH whatever s: the march's profile is normalised (RaymarchShaders ProfileSpan), so a lower
+	// top holds the same mass, denser. The march box is sized from the shape's maximum x kSurfaceMax while the
+	// response is on (WindShaders::LowLayerTop). The round edge fades the density only, keeping the height, so
 	// the far tier (RaymarchShaders FarLayer) can take over the same layer with weight 1 - edge at the same
 	// place (GPT review 2026-11-07).
-	const float  H = baseH;
+	// H is held to at least one unit (baseH where that is lower): the march's LayerTau skips a column under one unit,
+	// and the lowest column with the response on is 0.15 x 0.15 x Thickness, under one unit at Thickness < 44.4, so
+	// such columns and their mass would leave the screen (review r5 finding 5). With s = 1 (response off) this is
+	// baseH exactly.
+	const float  H = max(baseH * s, min(baseH, 1.001));   // a hair over LayerTau's H < 1 cut, so filtered reads stay above it
 	// Where and when fog forms (PlacementRules x FogConditions): radiation fog x conditions, plus steam over hot
 	// springs, plus steam over open water when the air is cold; steam thins with the wind like the rest.
 	// Radiation fog evaporates from the weakest places first by day (SteamP.x subtracted; photos 2026-11-08: midday
@@ -572,7 +751,9 @@ void CSColumn(uint3 id : SV_DispatchThreadID)
 		// a pool but not pile it up, so the pool's density never passes 1 + 0.6 x WispAmount times its setting,
 		// the peak the visibility floor is computed for (FogRenderer.cpp PoolDensityNow; Codex review 2026-11-10).
 		upperW += (poolDepth / 70.0) * SteamP.w * edge * lerp(1.0, min(rho, 1.0 + Counts.w), 0.6);
-		upperH = max(upperH, poolDepth);
+		// The height response lowers a pool's lid where the fog is thinned (s < 1), by 0.6 of at most one low layer's
+		// height: a runner does not sink a 4 m lid by 4 m. Never raised, so the box keeps its top; upperW stays.
+		upperH = max(upperH, poolDepth - min(poolDepth, Iter.x) * 0.6 * (1.0 - min(s, 1.0)));
 	}
 	// z = ground * known, so linear filtering next to unknown cells fades the fog instead of dragging the ground
 	// toward 0 (reviewer 2026-11-07); the march divides by w.
@@ -581,6 +762,9 @@ void CSColumn(uint3 id : SV_DispatchThreadID)
 	// H and W both x known, like the ground: filtering next to a wall texel then averages only the known heights
 	// (the march divides H by the filtered known), so a wall's height cannot lift a pool's top (GPT review 2026-11-08).
 	OutUpper[p] = float2(upperH * k, upperW * k);
+	// For the composite's relief shading (RaymarchShaders CompositeOut, ReliefGain): x known and 0 at walls like the
+	// rest, so filtering next to them fades it. 0 everywhere while the response is off.
+	OutRelief[p] = (s - 1.0) * k;
 }
 )";
 }

@@ -28,9 +28,13 @@ namespace FogConditions
 		float windHigh{ 0.8f };         // ... and where it clears the most
 		float windSuppress{ 0.7f };     // share cleared at windHigh
 		std::array<float, 12> season{ 1.25f, 1.2f, 1.05f, 1.0f, 0.9f, 0.8f, 0.75f, 0.8f, 1.0f, 1.15f, 1.25f, 1.3f };   // Morning Star .. Evening Star
-		// Air cold proxy (no survival mod): by month, and at night (fades in 19-22 h, out 05-08 h).
+		// Air cold proxy (no survival mod): by month, plus this much more at night (fades in 19-22 h, out 05-08 h).
+		// The night is added to the month, so a summer night stays far below a winter one (until 2026-11-14 it was
+		// max(month, 0.6), which gave full steam on clear nights from Midyear to Frostfall and less in winter).
+		// 0.13 has no literature source: it is the ambient cold Survival Mode Improved reported on one clear night in
+		// Last Seed at Riverwood (in game 2026-11-14), so there the path without the survival mod gives the same air.
 		std::array<float, 12> airCold{ 0.6f, 0.6f, 0.3f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.3f, 0.6f, 0.6f };
-		float nightCold{ 0.6f };
+		float nightCold{ 0.13f };
 		// How cold open water is by month, on the air scale; it lags the air by one to two months.
 		std::array<float, 12> waterCold{ 0.35f, 0.45f, 0.5f, 0.45f, 0.3f, 0.15f, 0.05f, 0.0f, 0.05f, 0.15f, 0.25f, 0.3f };
 		float steamSpan{ 0.4f };   // air colder than the water by this much = full steam
@@ -108,13 +112,13 @@ namespace FogConditions
 		const int   m = ((a_s.month % 12) + 12) % 12;
 		const float season = a_p.season[static_cast<std::size_t>(m)];
 		r.global = std::clamp(r.time * r.wind * season, 0.0f, 4.0f);
-		// Air cold: the survival mod's ambient cold when there is one, else snow weather, night and the month.
+		// Air cold: the survival mod's ambient cold when there is one, else snow weather or the month plus the night.
 		// Night fades in and out over three hours each side, so the steam does not jump at a fixed hour.
 		const float h = std::fmod(std::fmod(a_s.hour, 24.0f) + 24.0f, 24.0f);
 		const float night = a_p.nightCold * std::max(1.0f - Smoothstep(5.0f, 8.0f, h), Smoothstep(19.0f, 22.0f, h));
 		const std::size_t mi = static_cast<std::size_t>(m);
 		r.air = a_s.survivalCold >= 0.0f ? std::clamp(a_s.survivalCold, 0.0f, 1.0f)
-		                                  : std::clamp(std::max({ a_s.snow ? 1.0f : 0.0f, night, a_p.airCold[mi] }), 0.0f, 1.0f);
+		                                  : std::clamp(std::max(a_s.snow ? 1.0f : 0.0f, a_p.airCold[mi] + night), 0.0f, 1.0f);
 		// Steam needs air colder than the water, not cold air alone.
 		r.cold = std::clamp((r.air - a_p.waterCold[mi]) / std::max(a_p.steamSpan, 0.01f), 0.0f, 1.0f);
 		r.evaporation = std::max(a_p.evaporation, 0.0f) * std::max(1.0f - r.global, 0.0f);

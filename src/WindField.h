@@ -1,8 +1,9 @@
 #pragma once
 
 // Game side of the shared wind + fog grid: gathers the base wind (Sky, written by Dynamic Wind, only read
-// here), moving actors and magic impacts, and steps WindSim once per drawn frame. The grid covers the same
-// square as the terrain height grid and moves with it.
+// here), moving actors and magic impacts, and steps WindSim once per drawn frame (twice when the frame is longer
+// than 1/30 s, WindRules::StepsPerFrame). The grid covers the same square as the terrain height grid and moves
+// with it.
 
 namespace WindField
 {
@@ -41,6 +42,7 @@ namespace WindField
 		std::array<float, 4> a_coarseParams = { 0.0f, 0.0f, 0.0f, 0.0f });
 	ID3D11ShaderResourceView* ColumnSrv();
 	ID3D11ShaderResourceView* UpperSrv();   // the tall layer (steam, pooled fog) next to ColumnSrv
+	ID3D11ShaderResourceView* ReliefSrv();  // the column height factor - 1 (relief shading) next to ColumnSrv
 
 	// Where the field lies in the world, and whether it has been stepped.
 	bool                      Ready();
@@ -50,6 +52,7 @@ namespace WindField
 	float                     GustX();  // base wind travel, units (the fog shape drifts by it)
 	float                     GustY();
 	float                     DriftSpeed();   // base wind this frame, units/s: how fast the fog shape travels
+	std::string               DescribeInput();   // the game's wind changes per frame since the last call ("wind input:" line); resets the window
 	float                     SimTime();   // seconds the field has run (the column noise clock)
 
 	const Stats& GetStats();

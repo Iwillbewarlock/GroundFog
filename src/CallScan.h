@@ -21,4 +21,7 @@ namespace CallScan
 
 	// Every E8 call in a_code (loaded at a_base) whose target equals a_target.
 	std::vector<Hit> FindCallsTo(std::span<const std::uint8_t> a_code, std::uintptr_t a_base, std::uintptr_t a_target);
+
+	// Every E9 `jmp rel32` (a tail call) in a_code whose target equals a_target. Same false-hit caveat as above.
+	std::vector<Hit> FindJumpsTo(std::span<const std::uint8_t> a_code, std::uintptr_t a_base, std::uintptr_t a_target);
 }

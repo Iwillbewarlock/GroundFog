@@ -192,6 +192,18 @@ namespace WeatherFog
 			return p;
 		}
 
+		// WeatherRules::DayFogShare for the sky now (user 2026-11-14 under Azurite's SkyrimFog at 06:00: "일반 안개 없이
+		// 땅안개만 있으니 이상하네"). Both distances carry GameFogScale, so the ratio does not.
+		float DayFogShare(const RE::Sky* a_sky)
+		{
+			if (!a_sky || !a_sky->currentWeather) {
+				return 1.0f;
+			}
+			const float now = a_sky->currentWeather->fogData.dayFar;
+			const float last = a_sky->lastWeather ? a_sky->lastWeather->fogData.dayFar : now;
+			return WeatherRules::DayFogShare(now, last, a_sky->currentWeatherPct, a_sky->fogFar);
+		}
+
 		float FactorOf(const RE::TESWeather* a_w)
 		{
 			if (!a_w) {
@@ -299,7 +311,7 @@ namespace WeatherFog
 			const float now = FactorOf(sky->currentWeather);
 			const float last = sky->lastWeather ? FactorOf(sky->lastWeather) : now;
 			const float pct = std::clamp(std::isfinite(sky->currentWeatherPct) ? sky->currentWeatherPct : 1.0f, 0.0f, 1.0f);
-			target = (last + (now - last) * pct) * g_csFactor.load();
+			target = WeatherRules::ApplyDayShare(last + (now - last) * pct, DayFogShare(sky)) * g_csFactor.load();
 		}
 		const auto t = std::chrono::steady_clock::now();
 		if (g_resetSmooth.exchange(false)) {
@@ -332,9 +344,9 @@ namespace WeatherFog
 			const auto it = g_name.find(a_w->GetFormID());
 			return it == g_name.end() ? std::format("{:08X}", a_w->GetFormID()) : it->second;
 		};
-		return std::format("weather {} ({:.2f}) <- {} ({:.2f}) at {:.0f}%, CS x{:.2f}, applied {:.2f}", name(sky->currentWeather),
-			FactorOf(sky->currentWeather), name(sky->lastWeather), FactorOf(sky->lastWeather), sky->currentWeatherPct * 100.0f, g_csFactor.load(),
-			g_smoothed);
+		return std::format("weather {} ({:.2f}) <- {} ({:.2f}) at {:.0f}%, game fog far {:.0f} (day share {:.2f}), CS x{:.2f}, applied {:.2f}",
+			name(sky->currentWeather), FactorOf(sky->currentWeather), name(sky->lastWeather), FactorOf(sky->lastWeather),
+			sky->currentWeatherPct * 100.0f, sky->fogFar, DayFogShare(sky), g_csFactor.load(), g_smoothed);
 	}
 
 	Renderer DetectedRenderer() { return g_renderer.load(); }

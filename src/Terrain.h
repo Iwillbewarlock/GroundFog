@@ -68,4 +68,24 @@ namespace Terrain
 	std::uint32_t          CoarseGeneration();   // bumped when the coarse grid is rebuilt from scratch
 	bool                   CoarseDirty();        // heights or position changed since the last ClearCoarseDirty
 	void                   ClearCoarseDirty();
+
+	// The far layer's land table (FogRenderer t6, RaymarchShaders.h FarGround): kLandSize^2 heights kLandCell apart, as
+	// fine as the land itself (12288 units either side, past the land the game loads around the player), filled
+	// centre-first with a per-frame query budget, moved by whole vertices, cleared with the fine grid (worldspace change,
+	// reset). Heights only (water surface over water); a vertex GetLandHeight cannot read stays unknown and is asked again
+	// as the coarse grid's are.
+	inline constexpr int   kLandSize = 193;
+	inline constexpr float kLandCell = 128.0f;
+	void                   UpdateLand(const RE::NiPoint3& a_player);   // call after Update, same frame
+	const Grid&            LandGrid();
+	std::span<const float> LandHeights();
+	std::uint32_t          LandGeneration();   // bumped when the land table is rebuilt from scratch
+	bool                   LandDirty();        // a vertex became known or the table moved since the last ClearLandDirty
+	void                   ClearLandDirty();
+
+	// Ground at world (a_x, a_y) from the fine grid, bilinear; false off the grid or next to a vertex not known.
+	bool HeightAt(float a_x, float a_y, float& a_out);
+	// As HeightAt, and off the fine grid from the land table (12288 units either side, 128 apart; FogRenderer's
+	// LocalLights, Codex review 2026-11-17: a light past the fine grid had been taken whole, then dropped on entering it).
+	bool GroundAt(float a_x, float a_y, float& a_out);
 }

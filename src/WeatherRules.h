@@ -175,4 +175,27 @@ namespace WeatherRules
 		const float dist = a_w.dayFar > 1.0f ? std::clamp(std::sqrt(a_p.farReference / a_w.dayFar), 0.5f, 2.0f) : 1.0f;
 		return { clampF(flag * dist), a_w.editorID.empty() ? "flags (no EditorID)" : "flags" };
 	}
+
+	// Share of a weather's daytime fog that the game shows now: the weathers' day fog distance (blended through the
+	// transition as the sky blends) over the sky's current fog distance, 0..1. Weathers keep their fog for the day
+	// (Azurite's SkyrimFog: day far 15000, night far 300000); the sky's fogFar is the hour's blend. Unusable input = 1.
+	inline float DayFogShare(float a_dayFarNow, float a_dayFarLast, float a_pct, float a_skyFar)
+	{
+		if (!std::isfinite(a_skyFar) || a_skyFar <= 1.0f) {
+			return 1.0f;
+		}
+		const float pct = std::clamp(std::isfinite(a_pct) ? a_pct : 1.0f, 0.0f, 1.0f);
+		const float dayFar = a_dayFarLast + (a_dayFarNow - a_dayFarLast) * pct;
+		if (!std::isfinite(dayFar) || dayFar <= 1.0f) {
+			return 1.0f;
+		}
+		return std::clamp(dayFar / a_skyFar, 0.0f, 1.0f);
+	}
+
+	// A foggy weather's extra ground fog follows that share, so a weather whose own fog is gone (night, dawn) does
+	// not boost the ground fog alone. A factor at or below 1 (clear weathers) stays as it is.
+	inline float ApplyDayShare(float a_factor, float a_share)
+	{
+		return a_factor > 1.0f ? 1.0f + (a_factor - 1.0f) * std::clamp(a_share, 0.0f, 1.0f) : a_factor;
+	}
 }

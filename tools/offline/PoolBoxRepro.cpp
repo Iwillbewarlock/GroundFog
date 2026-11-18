@@ -49,7 +49,6 @@ namespace
 	constexpr float kOpacity = 0.18f;
 	constexpr float kSteepness = 3.0f;
 	constexpr int   kSteps = 24;
-	constexpr float kFlatLength = 4000.0f;
 	constexpr float kPoolDensity = 0.1f, kPoolMaxDepth = 280.0f, kPoolMinVisibility = 83.0f, kPoolRadius = 1500.0f;
 	constexpr float kCoarsePoolRadius = 6144.0f, kCoarseTolerance = 250.0f;
 
@@ -369,7 +368,7 @@ int main(int argc, char** argv)
 		rc.posAdjust[1] = cam.y;
 		rc.posAdjust[2] = cam.z;
 		rc.farFog[0] = 1.0f;
-		rc.farFog[1] = kFlatLength;
+		rc.farFog[1] = Ground(cam.x, cam.y);   // ground z used without a land table: the ground under the player
 		rc.farFog[2] = kThickness;
 		rc.farFog[3] = 0.0f;
 		rc.poolGrid[0] = rc.poolGrid[1] = coarseOrigin;

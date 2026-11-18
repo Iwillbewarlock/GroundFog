@@ -44,7 +44,8 @@ if exist "%BUILD%\FogShaderCheck.exe" (
     if errorlevel 1 (
         echo ERROR: the offline shader check failed:
         type "%BUILD%\shader-check.log"
-        exit /b 1
+        rem not exit /b here: from inside these two nested blocks it reached "cmd /c build.cmd" as exit code 0
+        goto :fail
     )
     type "%BUILD%\shader-check.log"
 )
@@ -52,3 +53,6 @@ if exist "%BUILD%\FogShaderCheck.exe" (
 echo Done.
 endlocal
 exit /b 0
+
+:fail
+exit /b 1

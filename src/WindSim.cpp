@@ -54,21 +54,29 @@ void WindSim::ReleaseTarget(Target& a_t)
 	SafeRelease(a_t.tex);
 }
 
-std::vector<ShaderCache::Job> WindSim::ShaderJobs()
+// FogSampling 0 is WindShaders::kSource as it stands; Create and ShaderJobs use the same text for each mode.
+std::string WindSim::Source(int a_fogSampling)
+{
+	return a_fogSampling == 1 ? std::string("#define FOG_SAMPLING 1\n") + WindShaders::kSource : std::string(WindShaders::kSource);
+}
+
+std::vector<ShaderCache::Job> WindSim::ShaderJobs(int a_fogSampling)
 {
 	std::vector<ShaderCache::Job> jobs;
-	for (int k = 0; k < kKernelCount; ++k) jobs.push_back({ WindShaders::kSource, kEntries[k], "cs_5_0", "GroundFogWind" });
+	for (int k = 0; k < kKernelCount; ++k) jobs.push_back({ Source(a_fogSampling), kEntries[k], "cs_5_0", "GroundFogWind" });
 	return jobs;
 }
 
-bool WindSim::Create(ID3D11Device* a_device, int a_resolution, std::string& a_error)
+bool WindSim::Create(ID3D11Device* a_device, int a_resolution, std::string& a_error, int a_fogSampling)
 {
 	Release();
 	_res = a_resolution;
+	_fogSampling = a_fogSampling == 1 ? 1 : 0;
+	const std::string source = Source(_fogSampling);
 	for (int k = 0; k < kKernelCount; ++k) {
 		ID3DBlob* code = nullptr;
 		ID3DBlob* errors = nullptr;
-		const HRESULT hr = ShaderCache::Compile(WindShaders::kSource, kEntries[k], "cs_5_0", "GroundFogWind", &code, &errors);
+		const HRESULT hr = ShaderCache::Compile(source, kEntries[k], "cs_5_0", "GroundFogWind", &code, &errors);
 		if (FAILED(hr)) {
 			a_error = std::string(kEntries[k]) + ": " + (errors ? static_cast<const char*>(errors->GetBufferPointer()) : "no message");
 			SafeRelease(errors);
@@ -106,7 +114,8 @@ bool WindSim::Create(ID3D11Device* a_device, int a_resolution, std::string& a_er
 	     CreateTarget(a_device, DXGI_FORMAT_R16_FLOAT, _curl) &&
 	     CreateTarget(a_device, DXGI_FORMAT_R16_FLOAT, _wall) &&
 	     CreateTarget(a_device, DXGI_FORMAT_R32G32B32A32_FLOAT, _column) &&
-	     CreateTarget(a_device, DXGI_FORMAT_R32G32_FLOAT, _upper);
+	     CreateTarget(a_device, DXGI_FORMAT_R32G32_FLOAT, _upper) &&
+	     CreateTarget(a_device, DXGI_FORMAT_R16_FLOAT, _relief);   // typed R16 UAV, as _wall and _curl
 	if (!ok) {
 		a_error = "texture, buffer or sampler creation failed";
 		Release();
@@ -131,6 +140,7 @@ void WindSim::Release()
 	ReleaseTarget(_wall);
 	ReleaseTarget(_column);
 	ReleaseTarget(_upper);
+	ReleaseTarget(_relief);
 	_ready = false;
 }
 
@@ -165,6 +175,7 @@ void WindSim::Reset(ID3D11DeviceContext* a_ctx)
 	a_ctx->ClearUnorderedAccessViewFloat(_wall.uav, zero);
 	a_ctx->ClearUnorderedAccessViewFloat(_column.uav, zero);
 	a_ctx->ClearUnorderedAccessViewFloat(_upper.uav, zero);
+	a_ctx->ClearUnorderedAccessViewFloat(_relief.uav, zero);
 }
 
 void WindSim::BuildColumns(ID3D11DeviceContext* a_ctx, ID3D11ShaderResourceView* a_heights, float a_thickness, float a_time,
@@ -195,6 +206,7 @@ void WindSim::BuildColumns(ID3D11DeviceContext* a_ctx, ID3D11ShaderResourceView*
 	a_ctx->CSSetShaderResources(9, 1, &a_coarse);
 	a_ctx->CSSetUnorderedAccessViews(4, 1, &_column.uav, nullptr);
 	a_ctx->CSSetUnorderedAccessViews(5, 1, &_upper.uav, nullptr);
+	a_ctx->CSSetUnorderedAccessViews(6, 1, &_relief.uav, nullptr);   // Run's Unbind clears u0..u6 (ComputeGuard::kUavSlots)
 	Run(a_ctx, kColumn);
 }
 

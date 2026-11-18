@@ -49,12 +49,19 @@ namespace FogLight
 		return kShare.back();
 	}
 
+	// How much of the layer the direct sun reaches at a sun elevation in degrees: 0 below kSunClearsLow, 1 from
+	// kSunClearsHigh, smooth between.
+	inline float SunReach(float a_elevationDeg)
+	{
+		const float t = std::clamp((a_elevationDeg - kSunClearsLow) / (kSunClearsHigh - kSunClearsLow), 0.0f, 1.0f);
+		return t * t * (3.0f - 2.0f * t);
+	}
+
 	// Weight of the direct sun in the fog's colour: its share of the light, times how much of the layer the sun
 	// reaches, times a_day (0 at night, when the "sun" light may be the moon), times the user's a_sunMix (1 = as is).
 	inline float SunWeight(float a_elevationDeg, float a_day, float a_sunMix)
 	{
-		const float t = std::clamp((a_elevationDeg - kSunClearsLow) / (kSunClearsHigh - kSunClearsLow), 0.0f, 1.0f);
-		const float reached = t * t * (3.0f - 2.0f * t);
+		const float reached = SunReach(a_elevationDeg);
 		return std::clamp(DirectShare(a_elevationDeg) * reached * std::clamp(a_day, 0.0f, 1.0f) * a_sunMix, 0.0f, 1.0f);
 	}
 

@@ -8,7 +8,7 @@ Mod page: https://www.nexusmods.com/skyrimspecialedition/mods/198571
 
 ## What it does
 
-- A fog field about 117 m wide around the player, carried by a 2D fluid simulation on the GPU (256 x 256 cells).
+- A fog field about 176 m wide around the player, carried by a 2D fluid simulation on the GPU (384 x 384 cells).
   Running actors, spell projectiles and explosions push it aside; cliffs and steep slopes block it.
 - Beyond that field, a thin far layer to the horizon and pooled fog in hollows and valleys of the loaded terrain.
 - The amount follows the time of day, the weather, water and wet ground, the worldspace (`[Worldspaces]`) and the
@@ -73,8 +73,15 @@ as well. Version 0.1.0 of the mod was built against the older MIT-licensed Commo
   chapter 38): the fluid method. Walls follow Crane, Llamas and Tariq (GPU Gems 3, chapter 30).
 - Richard Bird and Roland Hulstrom, "A Simplified Clear Sky Model for Direct and Diffuse Insolation on Horizontal
   Surfaces" (SERI, 1981), computed with pvlib: the sun's and the sky's share of the light for the fog's colour.
-- Community Shaders team: engine addresses for the draw points.
-- NearMidnightNow, Dynamic Terrain Deformation: reference for projectile impact and terrain height lookups. Facts
-  only, no code copied.
+- Community Shaders team: engine addresses for the draw points, and the way Community Shaders gathers scene lights
+  (Light Limit Fix) and reads the sun's shadow maps, which GroundFog follows.
+- roxorvic (Victor), Ground Fog in his Community Shaders fork (skyrim-community-shaders, branch fluid-field/fog-v3,
+  GPL-3.0): the formulas for the fog's sun shading, the light glow, the large fog banks and fires clearing the fog.
+  Used with permission.
+- NearMidnightNow, Dynamic Terrain Deformation (GPL-3.0): its heat-source detection (fire-spell hazards and held
+  torches) is used for fire spells and torches clearing the fog, with permission; earlier a reference for projectile
+  impact and terrain height lookups.
+- QTR-Modding, SKSE Menu Framework 3 (GPL-3.0): its client header `include/SKSEMenuFramework.h`, for the optional
+  in-game settings page.
 - powerofthree: the `GetFormEditorID` export of po3 Tweaks, called for names when it is installed.
 - CommonLibSSE-NG contributors.

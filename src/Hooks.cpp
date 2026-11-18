@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include "FogRenderer.h"
+#include "GrassProbe.h"
 #include "SelfTest.h"
 #include "Settings.h"
 
@@ -69,8 +70,13 @@ namespace Hooks
 			{
 				++g_order.effectsCalls;
 				NoteEvent(static_cast<char>('0' + I));
+				GrassProbe::AtEffects(a_accumulator, static_cast<int>(I));
 				if (Settings::drawStage == Settings::DrawStage::kBeforeEffects) {
+					const auto drawsBefore = FogRenderer::GetStats().draws;
 					FogRenderer::Draw(g_effects.name, true, static_cast<int>(I));
+					if (FogRenderer::GetStats().draws != drawsBefore) {
+						GrassProbe::NoteFogDraw(static_cast<int>(I));
+					}
 					SelfTest::Tick();
 				}
 				func(a_accumulator, a_flags);
@@ -84,8 +90,13 @@ namespace Hooks
 			{
 				++g_order.effectsCalls;
 				NoteEvent('E');
+				GrassProbe::AtEffects(a_accumulator, 0);
 				if (Settings::drawStage == Settings::DrawStage::kBeforeEffects) {
+					const auto drawsBefore = FogRenderer::GetStats().draws;
 					FogRenderer::Draw(g_effects.name, true, 0);
+					if (FogRenderer::GetStats().draws != drawsBefore) {
+						GrassProbe::NoteFogDraw(0);
+					}
 					SelfTest::Tick();
 				}
 				func(a_accumulator, a_flags);
@@ -99,6 +110,7 @@ namespace Hooks
 			{
 				func();
 				FogRenderer::NextFrame();  // the player view runs once per frame
+				GrassProbe::EndFrame();    // does nothing unless [Debug] GrassProbe installed it
 				++g_order.waterCalls;
 				NoteEvent('W');
 				if (Settings::drawStage == Settings::DrawStage::kAfterWaterEffects) {
@@ -192,7 +204,8 @@ namespace Hooks
 
 	void Install()
 	{
-		SKSE::AllocTrampoline(256);  // 14 bytes per hooked call, up to 10 calls
+		// 14 bytes per hooked call, up to 10 calls; [Debug] GrassProbe adds room for its own (GrassProbe.h).
+		SKSE::AllocTrampoline(Settings::grassProbe != 0 ? 256 + GrassProbe::kTrampolineBytes : 256);
 
 		const auto playerView = REL::RelocationID(35560, 36559).address();
 		const auto renderWorld = REL::RelocationID(99938, 106583).address();
@@ -209,6 +222,14 @@ namespace Hooks
 			// like a second draw of the same frame and is skipped.
 			logger::error("the water-effects call could not be hooked (another plugin may have redirected it): frames cannot be "
 						  "counted, so no fog will be drawn");
+		}
+
+		if (Settings::grassProbe != 0) {
+			if (!g_water.written) {
+				logger::error("grassprobe: the water-effects call is not hooked, so the probe never sees a frame end; probe off");
+			} else {
+				GrassProbe::Install(g_effects.written);
+			}
 		}
 
 		const auto& chosen = Settings::drawStage == Settings::DrawStage::kBeforeEffects ? g_effects : g_water;

@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <string>
 #include <string_view>
@@ -81,9 +82,14 @@ namespace PlacementRules
 		return Kind::kLake;
 	}
 
+	// "mud" alone is not marsh: LRiverMud01 is the bed of every river and pond, and it is the base texture of whole
+	// landscape quadrants (2048 x 2048 units) around them, dry banks included. With it the Falkreath mill pond's
+	// quadrant took the marsh-land multiplier and showed as a square of denser fog with straight edges on the cell
+	// quadrant's borders (in-game run 2026-11-13, LAND 00AC5F top-right quadrant, DEBUG-LEDGER.md). Marsh mud textures
+	// still match by "marsh" or "swamp" (RP_LMarshMud01, CYRLSwampMud01).
 	inline bool IsMarshLand(std::string_view a_landTextureEditorID)
 	{
-		return HasAny(LowerCopy(a_landTextureEditorID), { "marsh", "swamp", "bog", "mud" });
+		return HasAny(LowerCopy(a_landTextureEditorID), { "marsh", "swamp", "bog" });
 	}
 
 	struct Params
@@ -99,6 +105,7 @@ namespace PlacementRules
 		float freshSteam{ 1.0f };     // steam over lakes, rivers and marsh water at full cold ("river smoke")
 		float shoreFactor{ 1.5f };    // land right at the water's edge ...
 		float shoreDistance{ 700.0f };// ... fading to 1 over this many units (0 = no shore effect)
+		bool  bankCap{ false };       // land at the water's edge held to that water's value, the limit fading out across the band (see Build); false = as before
 		float valleyStrength{ 0.35f };// per valleyScale units below the local mean height
 		float valleyScale{ 150.0f };  // units
 		float valleyRadius{ 2048.0f };// units; the neighbourhood whose mean height a cell is compared with
@@ -187,7 +194,7 @@ namespace PlacementRules
 		// spot keeps its value as the grid moves; GPT review 2026-11-08: the whole-window mean followed the player).
 		// Summed-area tables of height and count: O(n). A neighbourhood less than half known is weighted down.
 		const std::size_t s1 = static_cast<std::size_t>(a_size) + 1;
-		std::vector<double> sumH(s1 * s1, 0.0), sumC(s1 * s1, 0.0);
+		std::vector<double> sumH(s1 * s1, 0.0), sumC(s1 * s1, 0.0), sumM(s1 * s1, 0.0);   // sumM: marsh land among them
 		for (int y = 0; y < a_size; ++y) {
 			for (int x = 0; x < a_size; ++x) {
 				const std::size_t i = static_cast<std::size_t>(y) * a_size + x;
@@ -195,6 +202,7 @@ namespace PlacementRules
 				const std::size_t j = (static_cast<std::size_t>(y) + 1) * s1 + x + 1;
 				sumH[j] = (use ? a_ground[i] : 0.0) + sumH[j - 1] + sumH[j - s1] - sumH[j - s1 - 1];
 				sumC[j] = (use ? 1.0 : 0.0) + sumC[j - 1] + sumC[j - s1] - sumC[j - s1 - 1];
+				sumM[j] = (use && a_kinds[i] == Kind::kMarshLand ? 1.0 : 0.0) + sumM[j - 1] + sumM[j - s1] - sumM[j - s1 - 1];
 			}
 		}
 		const int r = std::max(1, static_cast<int>(std::lround(a_p.valleyRadius / std::max(a_cell, 1.0f))));
@@ -204,15 +212,38 @@ namespace PlacementRules
 			       a_t[static_cast<std::size_t>(a_y1) * s1 + a_x0] + a_t[static_cast<std::size_t>(a_y0) * s1 + a_x0];
 		};
 		const double scale = std::max(a_p.valleyScale, 1.0f);
+		// Marsh land comes per landscape quadrant (the base texture of 2048 x 2048 units), so its multiplier is blended
+		// over kMarshBlend units: dry land takes the share of marsh land around it. A hard step drew the quadrant's
+		// straight borders in the fog.
+		constexpr float kMarshBlend = 512.0f;
+		const int rm = std::max(1, static_cast<int>(std::lround(kMarshBlend / std::max(a_cell, 1.0f))));
 
 		// Distance (cells, 8-neighbour steps) from each cell to the nearest water cell, up to the shore band.
+		// With bankCap the search also carries the multiplier of that water (bankWater): a cell first reached takes the
+		// value of the cell it was reached from, and reached again at the same distance it takes the larger one. Every
+		// cell at one distance is taken off the queue before any cell one step further, so a cell's value is final
+		// before it is passed on: bankWater = the LARGEST multiplier among the water cells at the smallest distance,
+		// whatever the scan order. Where two kinds of water meet, the bank between them is held to the larger, so the
+		// cap never takes land below what either neighbour's rule allows. Water further off than the nearest is not
+		// looked at (a lake two cells behind a river does not lift the river's bank).
 		const bool shore = a_p.shoreDistance > 0.0f;
 		const int band = shore ? std::max(1, static_cast<int>(std::ceil(a_p.shoreDistance / std::max(a_cell, 1.0f)))) : 0;
+		const bool bankCap = a_p.bankCap && shore;
+		auto waterMultiplier = [&](Kind k) {   // as the switch at the end of Build
+			switch (k) {
+			case Kind::kRiver:      return a_p.river;
+			case Kind::kMarshWater: return a_p.marshWater;
+			case Kind::kSea:        return a_p.seaRadiation;
+			default:                return a_p.lake;   // lake, hot spring
+			}
+		};
 		std::vector<int> dist(n, -1);
+		std::vector<float> bankWater(bankCap ? n : 0, 0.0f);
 		std::deque<std::size_t> queue;
 		for (std::size_t i = 0; i < n; ++i) {
 			if (known(i) && water(a_kinds[i])) {
 				dist[i] = 0;
+				if (bankCap) bankWater[i] = waterMultiplier(a_kinds[i]);
 				queue.push_back(i);
 			}
 		}
@@ -228,7 +259,10 @@ namespace PlacementRules
 					const std::size_t j = static_cast<std::size_t>(ny) * a_size + nx;
 					if (dist[j] < 0) {
 						dist[j] = dist[i] + 1;
+						if (bankCap) bankWater[j] = bankWater[i];
 						queue.push_back(j);
+					} else if (bankCap && dist[j] == dist[i] + 1) {
+						bankWater[j] = std::max(bankWater[j], bankWater[i]);
 					}
 				}
 			}
@@ -387,13 +421,20 @@ namespace PlacementRules
 			case Kind::kLake:       m = a_p.lake; o[2] = a_p.freshSteam; break;
 			case Kind::kRiver:      m = a_p.river; o[2] = a_p.freshSteam; break;
 			case Kind::kMarshWater: m = a_p.marshWater; o[2] = a_p.freshSteam; break;
-			case Kind::kMarshLand:  m = a_p.marshLand; break;
+			case Kind::kMarshLand:  break;   // blended below with the dry land around it
 			case Kind::kHotSpring:  m = a_p.lake; o[1] = a_p.hotSpring; break;
 			case Kind::kSea:        m = a_p.seaRadiation; o[2] = a_p.seaSteam; break;
 			default: break;
 			}
 			float terrain = 1.0f;
 			if (!water(k)) {
+				{
+					const int x = static_cast<int>(i % a_size), y = static_cast<int>(i / a_size);
+					const int x0 = std::max(x - rm, 0), y0 = std::max(y - rm, 0);
+					const int x1 = std::min(x + rm + 1, a_size), y1 = std::min(y + rm + 1, a_size);
+					const double c = boxSum(sumC, x0, y0, x1, y1);
+					if (c > 0.0) m = a_p.land + (a_p.marshLand - a_p.land) * static_cast<float>(boxSum(sumM, x0, y0, x1, y1) / c);
+				}
 				if (shore && dist[i] > 0) {
 					const float t = std::clamp(static_cast<float>(dist[i] - 1) / static_cast<float>(band), 0.0f, 1.0f);
 					terrain *= a_p.shoreFactor + (1.0f - a_p.shoreFactor) * t;
@@ -410,7 +451,145 @@ namespace PlacementRules
 				terrain = std::clamp(terrain, a_p.minMultiplier, a_p.maxMultiplier);
 			}
 			o[0] = std::max(m * terrain, 0.0f);
+			// Bank cap (bankCap, off by default): shore x valley stack on the bank (0.7 x 1.3 x 1.8 = 1.64 on a 20-degree
+			// bank) while the water beside it keeps its plain multiplier (river 1.1 to 1.4), so the fog stood thicker on the
+			// bank than over the water (DEBUG-LEDGER.md 2026-11-14 22:xx). Land touching the water is held to
+			// C = max(that water's multiplier, the cell's own land multiplier m); the limit is released linearly across
+			// the band, t = 0 at the cell touching the water, 1 at the band's outermost cell (which is thus untouched, so
+			// nothing new appears at the band's edge). Only ever lowers: a cell at or under C keeps its value bit for bit.
+			// max(.., m): flat marsh land beside a river keeps its own marsh multiplier. Limits: a band one cell wide has
+			// t = 0 (held to C, with the step to the land behind it); along the bank C steps where the nearest water
+			// changes kind, as the water itself does. The cap is NOT "bank never above its water": the limit is released
+			// from the first land cell on, so on a steep bank the land a few cells in still stands above the water (the
+			// 20-degree test bank, river 1.1: 1.1 at the water, then about 1.15 / 1.18 / 1.20 / 1.21 at cells 2 to 5, a
+			// ridge about 0.1 above the river some 320 units from it; printed by the offline check). Whether that ridge
+			// shows in game is not known yet; holding C across the whole band and fading over the last cells would remove it.
+			if (bankCap && !water(k) && dist[i] > 0) {
+				const float c = std::max(bankWater[i], m);
+				if (c < o[0]) {
+					const float t = band > 1 ? std::clamp(static_cast<float>(dist[i] - 1) / static_cast<float>(band - 1), 0.0f, 1.0f) : 0.0f;
+					o[0] = c * (1.0f - t) + o[0] * t;
+				}
+			}
 		}
+		return out;
+	}
+
+	// Diagnosis only (profiler / self-test log): does bank land exceed the water beside it? Read from a Build output
+	// and the inputs it was built from. "Bank" = known dry land (kLand) within the shore band, the band as Build has it
+	// (8-neighbour steps from the nearest known water cell, at most ceil(shoreDistance / cell)); marsh land in the band
+	// is kept apart (its own multiplier would hide the dry bank) and unknown cells are skipped (Build leaves them at 1).
+	// Each bank cell is compared with its nearest water cell; where several are equally near, with the one of the
+	// largest x, whatever the scan order (the rule Build's bank cap has, so a bank the cap holds to a lake's value is
+	// not counted as above the river on its other side). With BankCap on the count of cells "above" stays above 0 by
+	// design (the limit fades across the band): read the drop in the bank land max and in the largest excess instead.
+	// Water values are read from the grid (the largest x of each kind present; -1 = no such cell). Cost: one more band
+	// search, O(n); it is a second copy of Build's (limit: a change to Build's band rule must be made here too).
+	struct ShoreSummary
+	{
+		bool  valid{ false };
+		int   band{ 0 };              // cells
+		float bankLand{ -1.0f };      // largest x among bank cells (-1: none)
+		int   bankCells{ 0 };
+		int   bankAbove{ 0 };         // bank cells whose x is above their nearest water cell's x
+		float bankExcess{ 0.0f };     // largest (bank x - nearest water x), 0 when none is above
+		float bankMarsh{ -1.0f };     // largest x among marsh-land cells in the band (-1: none)
+		float landBeyond{ -1.0f };    // largest x among known dry land outside the band (-1: none)
+		std::array<float, static_cast<std::size_t>(Kind::kCount)> water = [] {   // by Kind; -1 = no such cell
+			std::array<float, static_cast<std::size_t>(Kind::kCount)> a{};
+			a.fill(-1.0f);
+			return a;
+		}();
+		float steamY{ 0.0f };         // largest y (hot-spring steam) over water
+		float steamZ{ 0.0f };         // largest z (steam at full cold) over water
+	};
+
+	inline ShoreSummary SummarizeShore(const std::vector<std::array<float, 4>>& a_out, const std::vector<float>& a_ground, const std::vector<Kind>& a_kinds,
+		int a_size, float a_cell, const Params& a_p)
+	{
+		ShoreSummary      s;
+		const std::size_t n = static_cast<std::size_t>(a_size) * static_cast<std::size_t>(a_size);
+		if (a_size <= 0 || a_out.size() != n || a_ground.size() != n || a_kinds.size() != n) {
+			return s;
+		}
+		auto known = [&](std::size_t i) { return a_ground[i] > -1.0e29f; };
+		auto water = [&](Kind k) { return k == Kind::kLake || k == Kind::kRiver || k == Kind::kMarshWater || k == Kind::kHotSpring || k == Kind::kSea; };
+		s.valid = true;
+		s.band = a_p.shoreDistance > 0.0f ? std::max(1, static_cast<int>(std::ceil(a_p.shoreDistance / std::max(a_cell, 1.0f)))) : 0;
+		std::vector<int>         dist(n, -1);
+		std::vector<std::size_t> from(n, 0);   // the nearest water cell of each reached cell (the largest x among equally near ones)
+		std::deque<std::size_t>  queue;
+		for (std::size_t i = 0; i < n; ++i) {
+			if (!known(i) || !water(a_kinds[i])) continue;
+			dist[i] = 0;
+			from[i] = i;
+			queue.push_back(i);
+			const auto k = static_cast<std::size_t>(a_kinds[i]);
+			s.water[k] = std::max(s.water[k], a_out[i][0]);
+			s.steamY = std::max(s.steamY, a_out[i][1]);
+			s.steamZ = std::max(s.steamZ, a_out[i][2]);
+		}
+		while (s.band > 0 && !queue.empty()) {
+			const std::size_t i = queue.front();
+			queue.pop_front();
+			if (dist[i] >= s.band) continue;
+			const int x = static_cast<int>(i % a_size), y = static_cast<int>(i / a_size);
+			for (int dy = -1; dy <= 1; ++dy) {
+				for (int dx = -1; dx <= 1; ++dx) {
+					const int nx = x + dx, ny = y + dy;
+					if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= a_size || ny >= a_size) continue;
+					const std::size_t j = static_cast<std::size_t>(ny) * a_size + nx;
+					if (dist[j] < 0) {
+						dist[j] = dist[i] + 1;
+						from[j] = from[i];
+						queue.push_back(j);
+					} else if (dist[j] == dist[i] + 1 && a_out[from[i]][0] > a_out[from[j]][0]) {
+						from[j] = from[i];   // equally near: the water of the larger value, as Build's bankWater
+					}
+				}
+			}
+		}
+		for (std::size_t i = 0; i < n; ++i) {
+			if (!known(i) || water(a_kinds[i])) continue;
+			const float v = a_out[i][0];
+			if (dist[i] <= 0) {
+				if (a_kinds[i] == Kind::kLand) s.landBeyond = std::max(s.landBeyond, v);
+				continue;
+			}
+			if (a_kinds[i] == Kind::kMarshLand) {
+				s.bankMarsh = std::max(s.bankMarsh, v);
+				continue;
+			}
+			s.bankLand = std::max(s.bankLand, v);
+			++s.bankCells;
+			const float over = v - a_out[from[i]][0];
+			if (over > 0.0f) {
+				++s.bankAbove;
+				s.bankExcess = std::max(s.bankExcess, over);
+			}
+		}
+		return s;
+	}
+
+	// One log line from a summary. a_cold and a_wind are the cold and wind factors of FogConditions at the moment: the
+	// steam a water cell gets is (y + z x cold) x wind, and no cell has both y and z.
+	inline std::string DescribeShore(const ShoreSummary& a_s, float a_cold, float a_wind)
+	{
+		if (!a_s.valid) return "shore: no summary yet";
+		auto num = [](float a_v, int a_digits) {
+			char buf[32];
+			std::snprintf(buf, sizeof(buf), "%.*f", a_digits, static_cast<double>(a_v));
+			return std::string(buf);
+		};
+		auto value = [&](float a_v) { return a_v < 0.0f ? std::string("-") : num(a_v, 3); };
+		std::string out = "shore: band " + std::to_string(a_s.band) + " cells, bank land max " + value(a_s.bankLand) + " (" + std::to_string(a_s.bankCells) +
+		                  " cells, " + std::to_string(a_s.bankAbove) + " above their nearest water, largest excess " + num(a_s.bankExcess, 3) + "), bank marsh land max " +
+		                  value(a_s.bankMarsh) + ", land beyond the band max " + value(a_s.landBeyond) + " | water multiplier:";
+		for (const Kind k : { Kind::kLake, Kind::kRiver, Kind::kMarshWater, Kind::kSea, Kind::kHotSpring }) {
+			out += std::string(" ") + KindName(k) + " " + value(a_s.water[static_cast<std::size_t>(k)]);
+		}
+		out += " | steam over water: max z " + num(a_s.steamZ, 2) + ", max y " + num(a_s.steamY, 2) + ", now " +
+		       num(std::max(a_s.steamY, a_s.steamZ * a_cold) * a_wind, 2) + " (conditions steam " + num(a_cold, 2) + ", wind " + num(a_wind, 2) + ")";
 		return out;
 	}
 }

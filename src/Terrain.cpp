@@ -19,7 +19,8 @@ namespace Terrain
 		Stats              g_stats{};
 		bool               g_dirty{ true };
 		bool               g_valid{ false };
-		std::size_t        g_cursor{ 0 };
+		std::vector<std::size_t> g_fillOrder;   // cell indices nearest the centre first (GridMath::CentreFirstOrder)
+		std::size_t        g_cursor{ 0 };        // positions in g_fillOrder
 		std::size_t        g_retryCursor{ 0 };
 		const void*        g_worldspace{ nullptr };
 		float              g_probeZ{ 0.0f };
@@ -31,6 +32,14 @@ namespace Terrain
 		std::uint32_t            g_coarseGeneration{ 0 };
 		bool                     g_coarseDirty{ true };
 		bool                     g_coarseValid{ false };
+		// The far layer's land table.
+		Grid                     g_land{};
+		std::vector<float>       g_landHeights;
+		std::vector<std::size_t> g_landOrder;        // vertex indices nearest the centre first
+		std::size_t              g_landCursor{ 0 };
+		std::uint32_t            g_landGeneration{ 0 };
+		bool                     g_landDirty{ true };
+		bool                     g_landValid{ false };
 		int                g_pendingShiftX{ 0 };
 		int                g_pendingShiftY{ 0 };
 		bool               g_pendingReset{ true };
@@ -115,16 +124,21 @@ namespace Terrain
 			return ground;
 		}
 
-		// Asks up to a_budget cells whose value equals a_wanted (kUnknown or kFailed), walking from a_cursor.
+		// Asks up to a_budget cells whose value equals a_wanted (kUnknown or kFailed), walking g_fillOrder (nearest the
+		// grid's centre first) from position a_cursor and round again. The first fill starts at the centre, and so does
+		// the refill after a recenter (Update puts the unknown cursor back to 0): the land round the player is known
+		// first whatever the grid's size (in row order a 193 grid reached the player's row in its 19th frame). The
+		// failed cells' retries keep going round, so each gets its turn.
 		int Fill(RE::TES* a_tes, float a_wanted, int a_budget, std::size_t& a_cursor)
 		{
 			const auto count = g_heights.size();
 			int        asked = 0;
-			if (count == 0 || a_budget <= 0) {
+			if (count == 0 || a_budget <= 0 || g_fillOrder.size() != count) {
 				return asked;
 			}
+			a_cursor %= count;
 			for (std::size_t visited = 0; visited < count && asked < a_budget; ++visited) {
-				const std::size_t index = a_cursor;
+				const std::size_t index = g_fillOrder[a_cursor];
 				a_cursor = (a_cursor + 1) % count;
 				if (g_heights[index] != a_wanted) {
 					continue;
@@ -189,6 +203,9 @@ namespace Terrain
 			g_grid = { wantX, wantY, cell, size };
 			g_heights.assign(static_cast<std::size_t>(size) * size, kUnknown);
 			g_kinds.assign(static_cast<std::size_t>(size) * size, 0);
+			if (g_fillOrder.size() != g_heights.size()) {
+				g_fillOrder = GridMath::CentreFirstOrder(size);   // here, not in FillPending: its time is the self-test's "height fill time"
+			}
 			g_kindsDirty = true;
 			++g_generation;
 			g_pendingReset = true;
@@ -219,6 +236,7 @@ namespace Terrain
 				g_stats.lastShiftX = static_cast<std::uint32_t>(std::abs(dx));
 				g_stats.lastShiftY = static_cast<std::uint32_t>(std::abs(dy));
 				++g_stats.recenters;
+				g_cursor = 0;   // the new edge's cells nearest the centre first
 				g_dirty = true;
 				if (Settings::selfTest) {
 					VerifyAfterShift(tes);
@@ -234,6 +252,10 @@ namespace Terrain
 
 	void Reset()
 	{
+		g_landValid = false;
+		g_landHeights.clear();
+		g_landDirty = true;
+		++g_landGeneration;
 		g_coarseValid = false;
 		g_coarseHeights.clear();
 		g_coarseDirty = true;
@@ -341,6 +363,147 @@ namespace Terrain
 			g_coarseDirty = true;
 			++asked;
 		}
+	}
+
+	void UpdateLand(const RE::NiPoint3& a_player)
+	{
+		auto* tes = RE::TES::GetSingleton();
+		if (!tes || !g_valid) {
+			return;
+		}
+		constexpr int   size = kLandSize;
+		constexpr float cell = kLandCell;
+		constexpr float half = cell * static_cast<float>((size - 1) / 2);
+		// 37249 vertices at about 0.4 us a query (15 ms in all): 512 a frame keeps it near 0.2 ms, half of the fine grid's
+		// first-fill budget, and fills the table in about 73 frames, the land near the player in the first few (centre
+		// first). A recenter's new edge (4 rows, 772 vertices) takes 2 frames; vertices that failed are not asked again then.
+		constexpr int   kBudget = 512;
+		constexpr float kRecenter = 4.0f * cell;
+		const float     wantX = GridMath::SnapToCell(a_player.x, cell) - half;
+		const float     wantY = GridMath::SnapToCell(a_player.y, cell) - half;
+		if (!g_landValid) {
+			g_land = { wantX, wantY, cell, size };
+			g_landHeights.assign(static_cast<std::size_t>(size) * size, kUnknown);
+			if (g_landOrder.size() != g_landHeights.size()) {
+				g_landOrder.resize(g_landHeights.size());
+				for (std::size_t i = 0; i < g_landOrder.size(); ++i) g_landOrder[i] = i;
+				const int c = (size - 1) / 2;
+				std::stable_sort(g_landOrder.begin(), g_landOrder.end(), [&](std::size_t a, std::size_t b) {
+					const int ax = static_cast<int>(a % size) - c, ay = static_cast<int>(a / size) - c;
+					const int bx = static_cast<int>(b % size) - c, by = static_cast<int>(b / size) - c;
+					return ax * ax + ay * ay < bx * bx + by * by;
+				});
+			}
+			g_landCursor = 0;
+			g_landValid = true;
+			g_landDirty = true;
+			++g_landGeneration;
+		} else if (std::fabs(a_player.x - (g_land.originX + half)) > kRecenter || std::fabs(a_player.y - (g_land.originY + half)) > kRecenter) {
+			const int dx = static_cast<int>(std::lround((wantX - g_land.originX) / cell));
+			const int dy = static_cast<int>(std::lround((wantY - g_land.originY) / cell));
+			// Failed vertices stay failed here: land loads when the player enters another cell, and that (and the timer)
+			// asks them again below. Asking all of them again at every shift cost about 22 frames of the full budget every
+			// 512 units of movement (reviewer 2026-11-13).
+			GridMath::Shift(g_landHeights, size, dx, dy, kUnknown);
+			g_land.originX += dx * cell;
+			g_land.originY += dy * cell;
+			g_landCursor = 0;
+			g_landDirty = true;
+		}
+		// Failed vertices are land the game has not loaded: asked again when the player enters another cell and every 1800
+		// frames (about 30 s), as the coarse grid's. Unknown and failed upload the same, so this does not dirty the table.
+		static std::uint32_t            frames = 0;
+		static const RE::TESObjectCELL* lastCell = nullptr;
+		const auto*                     player = RE::PlayerCharacter::GetSingleton();
+		const RE::TESObjectCELL*        parentCell = player ? player->GetParentCell() : nullptr;
+		const bool                      moved = parentCell != lastCell;
+		lastCell = parentCell;
+		if (moved || ++frames % 1800 == 0) {
+			bool any = false;
+			for (auto& h : g_landHeights) {
+				if (h == kFailed) {
+					h = kUnknown;
+					any = true;
+				}
+			}
+			if (any) g_landCursor = 0;
+		}
+		// Centre first: walk the distance order from the cursor until the budget is spent on unknown vertices.
+		int asked = 0;
+		for (std::size_t k = g_landCursor; k < g_landOrder.size() && asked < kBudget; ++k) {
+			const std::size_t i = g_landOrder[k];
+			if (g_landHeights[i] != kUnknown) {
+				if (asked == 0) g_landCursor = k + 1;
+				continue;
+			}
+			const int x = static_cast<int>(i % size), y = static_cast<int>(i / size);
+			bool      ok = false;
+			const float h = QueryHeight(tes, g_land.originX + x * cell, g_land.originY + y * cell, ok);
+			g_landHeights[i] = ok ? h : kFailed;
+			g_landDirty = g_landDirty || ok;
+			++asked;
+		}
+	}
+
+	const Grid&            LandGrid() { return g_land; }
+	std::span<const float> LandHeights() { return g_landHeights; }
+	std::uint32_t          LandGeneration() { return g_landGeneration; }
+	bool                   LandDirty() { return g_landDirty; }
+	void                   ClearLandDirty() { g_landDirty = false; }
+
+	namespace
+	{
+		// Bilinear height from one of the grids; false off it or next to a vertex not known.
+		bool Bilinear(const Grid& a_grid, const std::vector<float>& a_heights, float a_x, float a_y, float& a_out)
+		{
+			const int size = a_grid.size;
+			if (size < 2 || !(a_grid.cell > 0.0f) || a_heights.size() != static_cast<std::size_t>(size) * size) {
+				return false;
+			}
+			const float gx = (a_x - a_grid.originX) / a_grid.cell;
+			const float gy = (a_y - a_grid.originY) / a_grid.cell;
+			if (!(gx >= 0.0f && gy >= 0.0f && gx <= static_cast<float>(size - 1) && gy <= static_cast<float>(size - 1))) {
+				return false;
+			}
+			const int   x0 = std::min(static_cast<int>(gx), size - 2);
+			const int   y0 = std::min(static_cast<int>(gy), size - 2);
+			const float fx = gx - static_cast<float>(x0), fy = gy - static_cast<float>(y0);
+			auto        at = [&](int a_x2, int a_y2) { return a_heights[static_cast<std::size_t>(a_y2) * size + a_x2]; };
+			const float h00 = at(x0, y0), h10 = at(x0 + 1, y0), h01 = at(x0, y0 + 1), h11 = at(x0 + 1, y0 + 1);
+			if (!IsKnown(h00) || !IsKnown(h10) || !IsKnown(h01) || !IsKnown(h11)) {
+				return false;
+			}
+			a_out = (h00 * (1.0f - fx) + h10 * fx) * (1.0f - fy) + (h01 * (1.0f - fx) + h11 * fx) * fy;
+			return true;
+		}
+	}
+
+	bool GroundAt(float a_x, float a_y, float& a_out)
+	{
+		return HeightAt(a_x, a_y, a_out) || (g_valid && Bilinear(g_land, g_landHeights, a_x, a_y, a_out));
+	}
+
+	bool HeightAt(float a_x, float a_y, float& a_out)
+	{
+		const int size = g_grid.size;
+		if (!g_valid || size < 2 || !(g_grid.cell > 0.0f) || g_heights.size() != static_cast<std::size_t>(size) * size) {
+			return false;
+		}
+		const float gx = (a_x - g_grid.originX) / g_grid.cell;
+		const float gy = (a_y - g_grid.originY) / g_grid.cell;
+		if (!(gx >= 0.0f && gy >= 0.0f && gx <= static_cast<float>(size - 1) && gy <= static_cast<float>(size - 1))) {
+			return false;
+		}
+		const int   x0 = std::min(static_cast<int>(gx), size - 2);
+		const int   y0 = std::min(static_cast<int>(gy), size - 2);
+		const float fx = gx - static_cast<float>(x0), fy = gy - static_cast<float>(y0);
+		auto        at = [&](int a_x2, int a_y2) { return g_heights[static_cast<std::size_t>(a_y2) * size + a_x2]; };
+		const float h00 = at(x0, y0), h10 = at(x0 + 1, y0), h01 = at(x0, y0 + 1), h11 = at(x0 + 1, y0 + 1);
+		if (!IsKnown(h00) || !IsKnown(h10) || !IsKnown(h01) || !IsKnown(h11)) {
+			return false;
+		}
+		a_out = (h00 * (1.0f - fx) + h10 * fx) * (1.0f - fy) + (h01 * (1.0f - fx) + h11 * fx) * fy;
+		return true;
 	}
 
 	const Grid&            CoarseGrid() { return g_coarse; }

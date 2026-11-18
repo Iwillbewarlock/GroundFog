@@ -1,6 +1,7 @@
 #include "PCH.h"
 
 #include "Settings.h"
+#include "IniEdit.h"
 
 #include <Windows.h>
 
@@ -138,10 +139,15 @@ namespace Settings
 		int stage = static_cast<int>(drawStage);
 		ReadInt(L"General", L"DrawStage", stage, 0, 1);
 		drawStage = static_cast<DrawStage>(stage);
-		ReadInt(L"General", L"DebugView", debugView, 0, 1);
+		ReadInt(L"General", L"DebugView", debugView, 0, 4);
+		ReadInt(L"General", L"MenuLanguage", menuLanguage, 0, 1);
+		ReadInt(L"General", L"ShadowMatrixMode", shadowMatrixMode, 0, 3);
 		ReadInt(L"General", L"MatrixMode", matrixMode, 0, 2);
 		ReadBool(L"General", L"CameraFilter", cameraFilter);
 		ReadInt(L"General", L"Probe", probe, 0, 1);
+		ReadInt(L"Debug", L"GrassProbe", grassProbe, 0, 2);
+		ReadBool(L"Debug", L"GrassProbeDump", grassProbeDump);
+		ReadInt(L"Debug", L"FixedNoisePhase", fixedNoisePhase, -1, 63);
 
 		ReadFloat(L"Render", L"WorldSize", worldSize, 512.0f, 16384.0f);
 		ReadFloat(L"Render", L"Thickness", thickness, 1.0f, 2000.0f);
@@ -155,10 +161,27 @@ namespace Settings
 		ReadInt(L"Render", L"ColorSpace", colorSpace, -1, 1);
 		ReadFloat(L"Render", L"RaymarchScale", raymarchScale, 0.25f, 1.0f);
 		ReadInt(L"Render", L"RaymarchSteps", raymarchSteps, 4, 64);
+		ReadFloat(L"Render", L"OwnRayTaps", ownRayTaps, 0.0f, 9.0f);
+		ReadInt(L"Render", L"UpsampleKernel", upsampleKernel, 0, 1);
+		ReadInt(L"Render", L"FogBlurRadius", fogBlurRadius, 0, 2);
+		ReadFloat(L"Render", L"FogBlurTolerance", fogBlurTolerance, 0.0f, 10.0f);
+		ReadFloat(L"Render", L"TemporalBlend", temporalBlend, 0.0f, 1.0f);
+		ReadFloat(L"Render", L"TemporalTolerance", temporalTolerance, 0.0f, 10.0f);
+		ReadBool(L"Render", L"TemporalClamp", temporalClamp);
+		ReadInt(L"Render", L"NoisePattern", noisePattern, 0, 1);
+		ReadInt(L"Render", L"DepthPick", depthPick, 0, 1);
+		ReadFloat(L"Render", L"SunShadow", sunShadow, 0.0f, 4.0f);
+		ReadFloat(L"Render", L"ShadeBrightness", shadeBrightness, 0.0f, 1.0f);
+		ReadInt(L"Render", L"LocalLights", localLights, 0, 16);
+		ReadFloat(L"Render", L"LocalLightStrength", localLightStrength, 0.0f, 4.0f);
+		ReadFloat(L"Render", L"LocalLightReach", localLightReach, 0.25f, 3.0f);
+		ReadFloat(L"Render", L"BankAmount", bankAmount, 0.0f, 1.0f);
+		ReadFloat(L"Render", L"ThinFogStart", thinFogStart, 0.0f, 3000.0f);
+		ReadFloat(L"Render", L"GrassCover", grassCover, 0.0f, 3000.0f);
+		ReadFloat(L"Render", L"ReliefGain", reliefGain, 0.0f, 0.3f);
 		ReadFloat(L"Render", L"ProfileSteepness", profileSteepness, 0.0f, 10.0f);
 
 		ReadBool(L"FarFog", L"Enable", farFog);
-		ReadFloat(L"FarFog", L"FlatLength", farFogFlatLength, 100.0f, 100000.0f);
 		ReadFloat(L"FarFog", L"NoiseAmount", farFogNoiseAmount, 0.0f, 1.0f);
 		ReadBool(L"FarFog", L"Pools", farPools);
 		ReadBool(L"Conditions", L"Enable", conditions);
@@ -180,6 +203,7 @@ namespace Settings
 		ReadFloat(L"Placement", L"RiverSmoke", placeFreshSteam, 0.0f, 10.0f);
 		ReadFloat(L"Placement", L"ShoreFactor", placeShoreFactor, 0.0f, 10.0f);
 		ReadFloat(L"Placement", L"ShoreDistance", placeShoreDistance, 0.0f, 10000.0f);
+		ReadBool(L"Placement", L"BankCap", placeBankCap);
 		ReadFloat(L"Placement", L"ValleyStrength", placeValleyStrength, 0.0f, 2.0f);
 		ReadFloat(L"Placement", L"ValleyScale", placeValleyScale, 10.0f, 5000.0f);
 		ReadFloat(L"Placement", L"ValleyRadius", placeValleyRadius, 128.0f, 8192.0f);
@@ -187,6 +211,7 @@ namespace Settings
 		ReadFloat(L"Placement", L"SteamHeight", placeSteamHeight, 0.0f, 600.0f);
 		ReadFloat(L"Placement", L"SteamDensity", placeSteamDensity, 0.0f, 5.0f);
 		ReadFloat(L"Conditions", L"Evaporation", condEvaporation, 0.0f, 2.0f);
+		ReadFloat(L"Conditions", L"NightCold", condNightCold, 0.0f, 1.0f);
 		ReadFloat(L"Placement", L"PoolRadius", placePoolRadius, 0.0f, 4000.0f);
 		ReadFloat(L"Placement", L"PoolMaxDepth", placePoolMaxDepth, 0.0f, 600.0f);
 		ReadFloat(L"Placement", L"PoolDensity", placePoolDensity, 0.0f, 5.0f);
@@ -217,6 +242,7 @@ namespace Settings
 		ReadInt(L"Wind", L"PressureIterations", pressureIterations, 1, 80);
 		ReadFloat(L"Wind", L"WindScale", windScale, 0.0f, 5000.0f);
 		ReadFloat(L"Wind", L"WindRelax", windRelax, 0.0f, 10.0f);
+		ReadFloat(L"Wind", L"InputSmoothing", windInputSmoothing, 0.0f, 10.0f);
 		ReadFloat(L"Wind", L"Vorticity", vorticity, 0.0f, 20.0f);
 		ReadFloat(L"Wind", L"GustAmount", gustAmount, 0.0f, 3.0f);
 		ReadFloat(L"Wind", L"GustMinimum", gustMinimum, 0.0f, 1000.0f);
@@ -228,11 +254,20 @@ namespace Settings
 		ReadFloat(L"Wind", L"ActorRadius", actorRadius, 10.0f, 1000.0f);
 		ReadFloat(L"Wind", L"ActorFollow", actorFollow, 0.0f, 50.0f);
 		ReadFloat(L"Wind", L"ActorPush", actorPush, 0.0f, 3.0f);
+		ReadFloat(L"Wind", L"ActorPushWalk", actorPushWalk, 0.0f, 1.0f);
 		ReadFloat(L"Wind", L"ActorPushMinSpeed", actorPushMinSpeed, 0.0f, 2000.0f);
+		ReadFloat(L"Wind", L"WakeEvaporate", wakeEvaporate, 0.0f, 3.0f);
+		ReadInt(L"Wind", L"FogSampling", fogSampling, 0, 1);
 		ReadFloat(L"Wind", L"BlastDepth", blastDepth, 0.0f, 20.0f);
 		ReadFloat(L"Wind", L"BlastDuration", blastDuration, 0.1f, 5.0f);
 		ReadFloat(L"Wind", L"BlastRadius", blastRadius, 10.0f, 1000.0f);
 		ReadFloat(L"Wind", L"BlastPush", blastPush, 0.0f, 2000.0f);
+		ReadFloat(L"Wind", L"ExplosionRadiusScale", explosionRadiusScale, 0.1f, 2.0f);
+		ReadFloat(L"Wind", L"FireEvaporate", fireEvaporate, 0.0f, 20.0f);
+		ReadFloat(L"Wind", L"FireClear", fireClear, 0.0f, 2.0f);
+		ReadFloat(L"Wind", L"TorchClear", torchClear, 0.0f, 0.2f);
+		ReadFloat(L"Wind", L"TorchReach", torchReach, 20.0f, 300.0f);
+		ReadFloat(L"Wind", L"SurfaceResponse", surfaceResponse, 0.0f, 1.0f);   // over 1 a pool's lowered lid passes the visibility floor's peak (Settings.h)
 
 		ReadInt(L"Terrain", L"HeightResolution", heightResolution, 9, 257);
 		{
@@ -242,6 +277,18 @@ namespace Settings
 			if (fixedRes != simResolution) {
 				logger::warn("ini [Wind] Resolution={} is not a multiple of HeightResolution-1 ({}); using {}", simResolution, cells, fixedRes);
 				simResolution = std::min(fixedRes, 1024);
+			}
+		}
+		{
+			// The defaults (WorldSize 12288, Resolution 384, HeightResolution 193) give 32-unit wind texels and 64-unit
+			// height cells. An ini that sets only some of the three (an older one with WorldSize = 8192 alone) gets other
+			// sizes: the values are used as given, and the log says what they come to.
+			const float texel = worldSize / static_cast<float>(simResolution);
+			const float cell = worldSize / static_cast<float>(heightResolution - 1);
+			if (std::fabs(texel - 32.0f) > 0.01f || std::fabs(cell - 64.0f) > 0.01f) {
+				logger::info("ini: WorldSize={} with [Wind] Resolution={} and [Terrain] HeightResolution={} gives {:.1f}-unit wind texels and {:.1f}-unit "
+							 "height cells (the defaults give 32 and 64: 12288 / 384 / 193, or 8192 / 256 / 129 for the old field size)",
+					worldSize, simResolution, heightResolution, texel, cell);
 			}
 		}
 		ReadFloat(L"Terrain", L"RecenterDistance", recenterDistance, 64.0f, 4096.0f);
@@ -269,8 +316,44 @@ namespace Settings
 		constexpr auto                        kCheckInterval = std::chrono::seconds(2);
 	}
 
+	bool WriteValue(const char* a_section, const char* a_key, const std::string& a_value)
+	{
+		const std::filesystem::path path{ IniPath() };
+		std::string                 text;
+		{
+			std::ifstream in{ path, std::ios::binary };
+			if (!in) {
+				logger::warn("menu: {} could not be read; [{}] {} = {} not saved", path.string(), a_section, a_key, a_value);
+				return false;
+			}
+			text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+		}
+		const std::string out = IniEdit::SetValue(text, a_section, a_key, a_value);
+		std::ofstream     file{ path, std::ios::binary | std::ios::trunc };
+		if (!file || !(file << out)) {
+			logger::warn("menu: {} could not be written; [{}] {} = {} not saved", path.string(), a_section, a_key, a_value);
+			return false;
+		}
+		logger::info("menu: [{}] {} = {}", a_section, a_key, a_value);
+		return true;
+	}
+
+	namespace
+	{
+		std::atomic<std::int64_t> g_reloadHeldUntil{ 0 };   // steady_clock ticks
+		constexpr auto            kReloadHold = std::chrono::milliseconds(500);
+	}
+
+	void HoldReload()
+	{
+		g_reloadHeldUntil.store((std::chrono::steady_clock::now() + kReloadHold).time_since_epoch().count(), std::memory_order_relaxed);
+	}
+
 	bool ReloadIfChanged()
 	{
+		if (std::chrono::steady_clock::now().time_since_epoch().count() < g_reloadHeldUntil.load(std::memory_order_relaxed)) {
+			return false;   // a control on the settings page is held (Menu.cpp)
+		}
 		const auto now = std::chrono::steady_clock::now();
 		if (g_haveWrite && now - g_lastCheck < kCheckInterval) {
 			return false;
@@ -296,20 +379,36 @@ namespace Settings
 	{
 		logger::info("settings: Enable={} SelfTest={} Profiler={} DrawStage={} DebugView={} MatrixMode={} CameraFilter={} Probe={}",
 			enable, selfTest, profiler, static_cast<int>(drawStage), debugView, matrixMode, cameraFilter, probe);
+		if (grassProbe != 0 || grassProbeDump) {
+			logger::info("settings: Debug GrassProbe={} GrassProbeDump={}", grassProbe, grassProbeDump);
+		}
+		if (fixedNoisePhase >= 0) {
+			logger::info("settings: Debug FixedNoisePhase={} (march jitter phase held, diagnosis only)", fixedNoisePhase);
+		}
 		logger::info("settings: WorldSize={} Thickness={} Opacity={} ProfileSteepness={}", worldSize, thickness, opacity, profileSteepness);
-		logger::info("settings: Brightness={} SunMix={} FogPower={} FogMax={} ColorSpace={} RaymarchScale={} RaymarchSteps={}", brightness,
-			sunMix, fogPower, fogMax, colorSpace, raymarchScale, raymarchSteps);
-		logger::info("settings: Wind Enable={} Walls={} Resolution={} PressureIterations={} WindScale={} Vorticity={} GustAmount={} WallSlope={}",
-			enableWind, enableWalls, simResolution, pressureIterations, windScale, vorticity, gustAmount, wallSlope);
+		logger::info("settings: Brightness={} SunMix={} FogPower={} FogMax={} ColorSpace={} RaymarchScale={} RaymarchSteps={} ThinFogStart={} GrassCover={} ReliefGain={}",
+			brightness, sunMix, fogPower, fogMax, colorSpace, raymarchScale, raymarchSteps, thinFogStart, grassCover, reliefGain);
+		logger::info("settings: Wind Enable={} Walls={} Resolution={} PressureIterations={} WindScale={} Vorticity={} GustAmount={} WallSlope={} "
+					 "SurfaceResponse={}",
+			enableWind, enableWalls, simResolution, pressureIterations, windScale, vorticity, gustAmount, wallSlope, surfaceResponse);
+		logger::info("settings: Wind WindRelax={} VelocityDissipation={} FogRefill={} MaxActors={} ActorRadius={} ActorFollow={} ActorPush={} ActorPushWalk={} "
+					 "ActorPushMinSpeed={} WakeEvaporate={} FogSampling={}",
+			windRelax, velocityDissipation, fogRefill, maxActors, actorRadius, actorFollow, actorPush, actorPushWalk, actorPushMinSpeed, wakeEvaporate, fogSampling);
+		logger::info("settings: Wind BlastDepth={} BlastDuration={} BlastRadius={} BlastPush={} ExplosionRadiusScale={} FireEvaporate={} FireClear={} TorchClear={} TorchReach={}", blastDepth,
+			blastDuration, blastRadius, blastPush, explosionRadiusScale, fireEvaporate, fireClear, torchClear, torchReach);
+		logger::info("settings: Wind InputSmoothing={}", windInputSmoothing);
+		logger::info("settings: Render OwnRayTaps={} UpsampleKernel={} FogBlurRadius={} FogBlurTolerance={} TemporalBlend={} TemporalTolerance={} TemporalClamp={} NoisePattern={} DepthPick={} SunShadow={} ShadeBrightness={} LocalLights={} LocalLightStrength={} LocalLightReach={} BankAmount={}",
+			ownRayTaps, upsampleKernel, fogBlurRadius, fogBlurTolerance, temporalBlend, temporalTolerance, temporalClamp, noisePattern, depthPick, sunShadow, shadeBrightness,
+			localLights, localLightStrength, localLightReach, bankAmount);
 		logger::info("settings: HeightResolution={} RecenterDistance={} HeightRetriesPerFrame={}",
 			heightResolution, recenterDistance, heightRetriesPerFrame);
-		logger::info("settings: FarFog Enable={} FlatLength={} NoiseAmount={} Pools={}; PoolMinVisibility={}", farFog, farFogFlatLength, farFogNoiseAmount, farPools, placePoolMinVisibility);
-		logger::info("settings: Conditions Enable={} Night={} MorningPeak={} Afternoon={} Wind {}..{} x{} Survival={}", conditions, condNight,
-			condMorningPeak, condAfternoon, condWindLow, condWindHigh, condWindSuppress, condUseSurvival);
-		logger::info("settings: Placement Enable={} Lake={} River={} MarshWater={} MarshLand={} HotSpring={} Sea={} SeaSmoke={} RiverSmoke={} Shore {} over {} Valley {} / {} within {} Land={} SteamHeight={} SteamDensity={} Evaporation={} Pool {} / {} x{}",
+		logger::info("settings: FarFog Enable={} NoiseAmount={} Pools={}; PoolMinVisibility={}", farFog, farFogNoiseAmount, farPools, placePoolMinVisibility);
+		logger::info("settings: Conditions Enable={} Night={} MorningPeak={} Afternoon={} Wind {}..{} x{} Survival={} NightCold={}", conditions, condNight,
+			condMorningPeak, condAfternoon, condWindLow, condWindHigh, condWindSuppress, condUseSurvival, condNightCold);
+		logger::info("settings: Placement Enable={} Lake={} River={} MarshWater={} MarshLand={} HotSpring={} Sea={} SeaSmoke={} RiverSmoke={} Shore {} over {} Valley {} / {} within {} Land={} SteamHeight={} SteamDensity={} Evaporation={} Pool {} / {} x{} BankCap={}",
 			placement, placeLake, placeRiver, placeMarshWater, placeMarshLand, placeHotSpring, placeSeaRadiation, placeSeaSteam, placeFreshSteam,
 			placeShoreFactor, placeShoreDistance, placeValleyStrength, placeValleyScale, placeValleyRadius, placeLand, placeSteamHeight,
-			placeSteamDensity, condEvaporation, placePoolRadius, placePoolMaxDepth, placePoolDensity);
+			placeSteamDensity, condEvaporation, placePoolRadius, placePoolMaxDepth, placePoolDensity, placeBankCap);
 		logger::info("settings: CoarsePools={} CoarsePoolRadius={} CoarseTolerance={} WispAmount={} GlowStrength={} GlowAnisotropy={}", coarsePools,
 			coarsePoolRadius, coarseTolerance, wispAmount, glowStrength, glowAnisotropy);
 		logger::info("settings: Weather Enable={} Flags P{} C{} R{} S{} FarReference={} FollowCommunityShaders={} CsReferenceDensity={}",

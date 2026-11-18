@@ -49,7 +49,7 @@ namespace
 	constexpr float kOpacity = 0.18f;      // ini Opacity (the user's value)
 	constexpr float kSteepness = 3.0f;     // ini ProfileSteepness
 	constexpr int   kSteps = 24;           // ini RaymarchSteps
-	constexpr float kFlatLength = 4000.0f; // ini FlatLength
+	constexpr float kGroundZ = 0.0f;       // the flat ground's z (the far layer's level without a land table)
 	constexpr int   kFrames = 4;
 	constexpr float kRadii[] = { 30000.0f, 150000.0f };       // dome facets this far from the camera
 	constexpr float kStrengths[] = { 0.2f, 0.7f, 1.0f };       // RayCB farFog[0] = global x (Land + region far value) - evaporation
@@ -111,6 +111,18 @@ namespace
 			}
 		}
 		return a_n ? std::sqrt(sum / a_n) : 0.0;
+	}
+
+	// RayCB farFog[1]: the shader versions this tool is built against (build-skymesh.cmd) read it as ini FlatLength (4000);
+	// from the land table on (RayCB landGrid) it is the ground z used without a table, the flat ground's here.
+	template <class T>
+	float FarFogY(const T& a_rc)
+	{
+		if constexpr (requires { a_rc.landGrid[0]; }) {
+			return kGroundZ;
+		} else {
+			return 4000.0f;
+		}
 	}
 }
 
@@ -354,7 +366,7 @@ int main(int argc, char** argv)
 				rc.posAdjust[1] = cam.y;
 				rc.posAdjust[2] = cam.z;
 				rc.farFog[0] = strength;
-				rc.farFog[1] = kFlatLength;
+				rc.farFog[1] = FarFogY(rc);
 				rc.farFog[2] = kThickness;
 				rc.farFog[3] = 1.0f;   // ini NoiseAmount
 				ctx->UpdateSubresource(cb, 0, nullptr, &rc, 0, 0);

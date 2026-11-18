@@ -30,6 +30,14 @@ namespace FogRenderer
 		std::uint32_t targetH{ 0 };
 		float         minDepth{ 0.0f };
 		float         maxDepth{ 0.0f };
+		// What the shaders were given at the last draw (read by the grass probe): DepthP.x / .y (proj _33 / _43; the
+		// shaders use them only for the sky test) and the z and w columns of the viewProj the scene distance is
+		// unprojected with (InvViewProj = its inverse).
+		float         depthP33{ 0.0f };
+		float         depthP43{ 0.0f };
+		float         viewProjZ[4]{};
+		float         viewProjW[4]{};
+		std::uint64_t probeId{ 0 };   // id of the last [PROBE] readback submitted (0 = none yet)
 	};
 
 	// Draws the ground fog (screen raymarch) into the main colour buffer. a_stage names the hook for the log.
@@ -42,6 +50,9 @@ namespace FogRenderer
 	void NextFrame();
 
 	void Reset();
+	// The grass probe ([Debug] GrassProbe) asks for one [PROBE] readback at this frame's draw, also with Probe=0, so the
+	// depth the shader reads through its view is logged for the frame the probe copied. Dropped at the frame's end.
+	void RequestProbe();
 	void PrecompileShaders();   // kDataLoaded: compile every shader on a background thread
 
 	const Stats& GetStats();

@@ -2,13 +2,13 @@
 
 #include <d3d11.h>
 
-// Saves and restores the compute bindings our dispatches touch (shader, t0-t9, u0-u5, b0-b2, s0), so the game's
+// Saves and restores the compute bindings our dispatches touch (shader, t0-t9, u0-u6, b0-b2, s0), so the game's
 // (and Community Shaders') compute state is unchanged afterwards. Used by WindSim and the raymarch probe.
 struct ComputeGuard
 {
 	static constexpr UINT kSrvSlots = 10;
 	static constexpr UINT kCbSlots = 3;
-	static constexpr UINT kUavSlots = 6;
+	static constexpr UINT kUavSlots = 7;   // u6: CSColumn's relief (WindShaders OutRelief); WindSim's Unbind clears the same range
 
 	ID3D11DeviceContext*       ctx;
 	ID3D11ComputeShader*       cs{ nullptr };

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(GroundFog VERSION 0.2.0 LANGUAGES CXX)
+project(GroundFog VERSION 0.3.0 LANGUAGES CXX)
 
 set(ENABLE_SKYRIM_SE ON  CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_AE ON  CACHE BOOL "" FORCE)
@@ -17,6 +17,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/Settings.cpp
     src/CallScan.cpp
     src/Hooks.cpp
+    src/GrassProbe.cpp
     src/Terrain.cpp
     src/FogRenderer.cpp
     src/GpuTimer.cpp
@@ -25,6 +26,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/WindField.cpp
     src/GameFog.cpp
     src/WeatherFog.cpp
+    src/Menu.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -33,6 +35,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
+# Sources are UTF-8: the settings page's Korean text must reach ImGui as UTF-8 whatever the system code page (2026-11-17).
+target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
 target_precompile_headers(${PROJECT_NAME} PRIVATE include/PCH.h)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -70,4 +74,17 @@ if(BUILD_OFFLINE_TOOLS)
     target_include_directories(PlacementExport PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(PlacementExport PRIVATE cxx_std_23)
     target_link_libraries(PlacementExport PRIVATE d3d11.lib d3dcompiler.lib dxguid.lib)
+    # A runner's trail by heading on the grid, fed as WindField::Update feeds the field (ledger 2026-11-15; not part of ALL: build-wakeheading.cmd).
+    add_executable(WakeHeading EXCLUDE_FROM_ALL tools/offline/WakeHeading.cpp src/WindSim.cpp)
+    target_include_directories(WakeHeading PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(WakeHeading PRIVATE cxx_std_23)
+    target_compile_definitions(WakeHeading PRIVATE GROUNDFOG_OFFLINE NOMINMAX)
+    target_link_libraries(WakeHeading PRIVATE d3d11.lib d3dcompiler.lib dxguid.lib)
+    # The grass depth probe's pure parts (GrassProbeMath.h, CallScan::FindJumpsTo) and a depth copy round trip on WARP.
+    # Not part of ALL and not run by build.cmd, so build.cmd's PASS/FAIL lines stay as they are: build-grassprobe.cmd.
+    add_executable(GrassProbeCheck EXCLUDE_FROM_ALL tools/offline/GrassProbeCheck.cpp src/CallScan.cpp)
+    target_include_directories(GrassProbeCheck PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(GrassProbeCheck PRIVATE cxx_std_23)
+    target_compile_definitions(GrassProbeCheck PRIVATE NOMINMAX)
+    target_link_libraries(GrassProbeCheck PRIVATE d3d11.lib)
 endif()
