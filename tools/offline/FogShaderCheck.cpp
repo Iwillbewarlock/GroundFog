@@ -4,7 +4,8 @@
 //      (slope share on planes, edge of the known land, unknown vertices, a single facet, bad sizes);
 //      GridMath::CentreFirstOrder (the height grid's fill order), NearestFirst (which moving actors get the wind
 //      field's slots), CoarseGateCells (the first coarse pool build's wait)
-//   3. RunWindSimChecks (WindSimCheck.cpp) and RunRaymarchChecks (RaymarchCheck.cpp): the wind and fog field,
+//   3. RunWindSimChecks (WindSimCheck.cpp), RunRaymarchChecks (RaymarchCheck.cpp) and RunSceneRatioChecks
+//      (SceneRatioCheck.cpp, the dynamic-resolution ratio lookup): the wind and fog field,
 //      the fog columns and the screen raymarch on WARP, and the CPU rules they use.
 
 #include "CallScan.h"
@@ -319,6 +320,7 @@ namespace
 
 int RunWindSimChecks();   // WindSimCheck.cpp, returns failures
 int RunRaymarchChecks();  // RaymarchCheck.cpp
+int RunSceneRatioChecks();   // SceneRatioCheck.cpp
 int WaivedSamplingFailures();   // WindSimCheck.cpp: the one known FogSampling 1 line, printed as FAIL but not counted
 
 int main()
@@ -332,6 +334,7 @@ int main()
 	TestFogLight();
 	g_fail += RunWindSimChecks();
 	g_fail += RunRaymarchChecks();
+	g_fail += RunSceneRatioChecks();
 	if (WaivedSamplingFailures() > 0) {
 		std::printf("%s (%d failures; %d known FogSampling 1 failure not counted, see its FAIL line)\n", g_fail == 0 ? "ALL PASS" : "FAILURES", g_fail,
 			WaivedSamplingFailures());

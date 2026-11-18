@@ -1543,14 +1543,9 @@ namespace GrassProbe
 		const float* p = reinterpret_cast<const float*>(&view.projMat);
 		const float* v = reinterpret_cast<const float*>(&view.viewMat);
 		const auto&  adjust = shadow->GetRuntimeData().posAdjust.getEye();
-		float        ratioW = 1.0f;
-		float        ratioH = 1.0f;
-		if (auto* state = RE::BSGraphics::State::GetSingleton()) {
-			ratioW = state->GetRuntimeData().dynamicResolutionWidthRatio;
-			ratioH = state->GetRuntimeData().dynamicResolutionHeightRatio;
-		}
-		if (!(ratioW > 0.05f && ratioW <= 1.0f)) ratioW = 1.0f;
-		if (!(ratioH > 0.05f && ratioH <= 1.0f)) ratioH = 1.0f;
+		const auto   ratios = FogRenderer::ReadSceneRatios();   // the same place FogRenderer::Draw reads them
+		const float  ratioW = ratios.width;
+		const float  ratioH = ratios.height;
 
 		g_pending = {};
 		g_pending.active = true;

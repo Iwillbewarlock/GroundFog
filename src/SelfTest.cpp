@@ -102,6 +102,11 @@ namespace SelfTest
 				fs.stateMismatches, fs.probeMismatches));
 		Info("viewport", std::format("{}x{} on a {}x{} target, depth range {}..{}", fs.viewportW, fs.viewportH, fs.targetW,
 							 fs.targetH, fs.minDepth, fs.maxDepth));
+		// Where the dynamic-resolution ratios were read (SceneRatio.h). Not found = CommonLib's fixed offset, which on
+		// one user's runtime read the TAA table and shrank the fog to 1911x1280 of a 3440x1440 screen.
+		Result(fs.ratioTableFound, "dynamic resolution ratios located",
+			std::format("{:.4f} x {:.4f} at State+0x{:X} (CommonLib's offset 0x{:X}){}", fs.ratioW, fs.ratioH, fs.ratioOffset, fs.ratioExpected,
+				fs.ratioTableFound ? "" : "; the TAA table was not found, so CommonLib's offset is used unchecked on this runtime (see the warning line with the floats)"));
 
 		const auto samples = FogRenderer::GpuSamples();
 		Result(samples > 0 && FogRenderer::GpuAverageMs() <= kDrawBudgetMs, "GPU time",

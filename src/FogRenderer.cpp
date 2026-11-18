@@ -18,6 +18,7 @@
 #include "WeatherFog.h"
 #include "Terrain.h"
 #include "GridMath.h"
+#include "SceneRatio.h"
 #include "WindField.h"
 #include "WorldspaceRules.h"
 #include "RegionRules.h"
@@ -2666,6 +2667,51 @@ namespace FogRenderer
 		}
 	}
 
+	SceneRatios ReadSceneRatios()
+	{
+		SceneRatios out;
+		auto*       state = RE::BSGraphics::State::GetSingleton();
+		if (!state) {
+			return out;
+		}
+		const auto* base = reinterpret_cast<const std::byte*>(state);
+		auto&       data = state->GetRuntimeData();
+		out.expectedOffset = static_cast<std::size_t>(reinterpret_cast<const std::byte*>(&data.dynamicResolutionWidthRatio) - base);
+		// The layout does not change while the game runs: keep the first place the table was found. Until then look
+		// again on every call (the table may not be filled yet). The reads stay inside RUNTIME_DATA on the layouts
+		// CommonLib describes (static_assert below); only the render thread calls this, so the statics need no lock.
+		constexpr auto kBefore = static_cast<std::size_t>(SceneRatio::kSearch + SceneRatio::kRowBytes);
+		constexpr auto kAfter = static_cast<std::size_t>(SceneRatio::kSearch + 8);
+		static_assert(offsetof(RE::BSGraphics::State::RUNTIME_DATA, dynamicResolutionWidthRatio) >= kBefore &&
+		              offsetof(RE::BSGraphics::State::RUNTIME_DATA, dynamicResolutionWidthRatio) + kAfter <= sizeof(RE::BSGraphics::State::RUNTIME_DATA));
+		static std::optional<std::size_t> s_found;
+		static bool                       s_loggedMissing = false;
+		const auto                        r = SceneRatio::Resolve(base, out.expectedOffset, s_found);
+		if (r.found && !s_found) {
+			s_found = r.offset;
+			logger::info("dynamic resolution ratios found after the TAA table at State+0x{:X} (CommonLib's offset 0x{:X}, {:+d} bytes)",
+				r.offset, out.expectedOffset, static_cast<std::ptrdiff_t>(r.offset) - static_cast<std::ptrdiff_t>(out.expectedOffset));
+		} else if (!r.found && !s_loggedMissing) {
+			s_loggedMissing = true;
+			// The floats searched, for the next report: the table's base-3 row should be among them.
+			constexpr std::size_t kFloats = (kBefore + kAfter) / 4;
+			float                 around[kFloats];
+			std::memcpy(around, base + out.expectedOffset - kBefore, sizeof(around));
+			std::string floats;
+			for (const float f : around) {
+				floats += std::format(" {:.4f}", f);
+			}
+			logger::warn("dynamic resolution ratios: the TAA table was not found within {} bytes of State+0x{:X} (yet; still looking each "
+						 "frame), reading there meanwhile. Floats from State+0x{:X}:{}",
+				SceneRatio::kSearch, out.expectedOffset, out.expectedOffset - kBefore, floats);
+		}
+		out.tableFound = r.found;
+		out.usedOffset = r.offset;
+		out.width = r.width;
+		out.height = r.height;
+		return out;
+	}
+
 	void Draw(const char* a_stage, bool a_ownTarget, int a_site)
 	{
 		const ProbeRequestScope probeRequest;
@@ -2872,14 +2918,16 @@ namespace FogRenderer
 			// 911-934). The viewport bound at the hook may be a previous pass's, so it is only compared and logged.
 			// Limit: each area change recreates the low-res target (fine for fixed upscaler ratios; a per-frame
 			// dynamic resolution would reallocate often; upgrade path: allocate the full size once).
-			float ratioW = 1.0f;
-			float ratioH = 1.0f;
-			if (auto* state = RE::BSGraphics::State::GetSingleton()) {
-				ratioW = state->GetRuntimeData().dynamicResolutionWidthRatio;
-				ratioH = state->GetRuntimeData().dynamicResolutionHeightRatio;
-			}
-			if (!(ratioW > 0.05f && ratioW <= 1.0f)) ratioW = 1.0f;
-			if (!(ratioH > 0.05f && ratioH <= 1.0f)) ratioH = 1.0f;
+			// The ratios are found after the TAA table, not at CommonLib's fixed offset (SceneRatio.h: on one user's
+			// runtime that offset read 5/9 x 8/9 and drew the fog on 1911x1280 of a 3440x1440 screen).
+			const auto  ratios = ReadSceneRatios();
+			const float ratioW = ratios.width;
+			const float ratioH = ratios.height;
+			g_stats.ratioW = ratioW;
+			g_stats.ratioH = ratioH;
+			g_stats.ratioOffset = static_cast<std::uint32_t>(ratios.usedOffset);
+			g_stats.ratioExpected = static_cast<std::uint32_t>(ratios.expectedOffset);
+			g_stats.ratioTableFound = ratios.tableFound;
 			const auto  texW = static_cast<float>(mainDesc.Width);
 			const auto  texH = static_cast<float>(mainDesc.Height);
 			const float areaW = std::max(1.0f, std::floor(texW * ratioW + 0.5f));
@@ -3090,8 +3138,11 @@ namespace FogRenderer
 		}
 		if (drawn) {
 			if (g_stats.draws == 0) {
-				logger::info("first fog draw at stage '{}': viewport {}x{} on a {}x{} target", a_stage,
-					vp.Width, vp.Height, mainDesc.Width, mainDesc.Height);
+				logger::info("first fog draw at stage '{}': viewport {}x{} on a {}x{} target (dynamic resolution ratios {:.4f} x {:.4f} at State+0x{:X}, {})",
+					a_stage, vp.Width, vp.Height, mainDesc.Width, mainDesc.Height, g_stats.ratioW, g_stats.ratioH, g_stats.ratioOffset,
+					!a_ownTarget             ? "viewport bound by the game"
+					: g_stats.ratioTableFound ? "found after the TAA table"
+											  : "TAA table not found, CommonLib's offset");
 			}
 			++g_stats.draws;
 			g_drawnFrame = g_frame;

@@ -38,7 +38,25 @@ namespace FogRenderer
 		float         viewProjZ[4]{};
 		float         viewProjW[4]{};
 		std::uint64_t probeId{ 0 };   // id of the last [PROBE] readback submitted (0 = none yet)
+		// The dynamic-resolution ratios the last own-target draw used, and where in BSGraphics::State they were read.
+		float         ratioW{ 1.0f };
+		float         ratioH{ 1.0f };
+		std::uint32_t ratioOffset{ 0 };
+		std::uint32_t ratioExpected{ 0 };   // CommonLib's offset for this runtime
+		bool          ratioTableFound{ false };
 	};
+
+	// The game's dynamic-resolution ratios (scene area = target x ratio, 1 without dynamic resolution or an upscaler),
+	// read after the TAA Halton table (SceneRatio.h), or at CommonLib's offset when the table is not found.
+	struct SceneRatios
+	{
+		float       width{ 1.0f };
+		float       height{ 1.0f };
+		std::size_t expectedOffset{ 0 };   // CommonLib's offset of the width ratio in BSGraphics::State
+		std::size_t usedOffset{ 0 };
+		bool        tableFound{ false };
+	};
+	SceneRatios ReadSceneRatios();   // render thread (the draw and the grass probe)
 
 	// Draws the ground fog (screen raymarch) into the main colour buffer. a_stage names the hook for the log.
 	// a_ownTarget: the hook is inside the player-view function, so bind the main target and viewport

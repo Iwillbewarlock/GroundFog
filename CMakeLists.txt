@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(GroundFog VERSION 0.3.0 LANGUAGES CXX)
+project(GroundFog VERSION 0.3.1 LANGUAGES CXX)
 
 set(ENABLE_SKYRIM_SE ON  CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_AE ON  CACHE BOOL "" FORCE)
@@ -50,7 +50,7 @@ option(BUILD_OFFLINE_TOOLS "Build the offline shader check" ON)
 
 if(BUILD_OFFLINE_TOOLS)
     # Offline checks: compiles the wind and raymarch shaders and runs them on WARP, plus the CPU-side rules.
-    add_executable(FogShaderCheck tools/offline/FogShaderCheck.cpp tools/offline/WindSimCheck.cpp tools/offline/RaymarchCheck.cpp src/CallScan.cpp src/WindSim.cpp)
+    add_executable(FogShaderCheck tools/offline/FogShaderCheck.cpp tools/offline/WindSimCheck.cpp tools/offline/RaymarchCheck.cpp tools/offline/SceneRatioCheck.cpp src/CallScan.cpp src/WindSim.cpp)
     target_include_directories(FogShaderCheck PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(FogShaderCheck PRIVATE cxx_std_23)
     target_compile_definitions(FogShaderCheck PRIVATE GROUNDFOG_OFFLINE)

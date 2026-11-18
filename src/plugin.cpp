@@ -61,7 +61,7 @@ namespace
 }
 
 SKSEPluginInfo(
-	.Version = REL::Version{ 0, 3, 0, 0 },
+	.Version = REL::Version{ 0, 3, 1, 0 },
 	.Name = "GroundFog"sv,
 	.RuntimeCompatibility = SKSE::VersionIndependence::AddressLibrary)
 
@@ -74,7 +74,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 		return false;
 	}
 	SKSE::Init(a_skse, false);  // false: keep our own log set up above
-	logger::info("GroundFog 0.3.0 loading on runtime {}", a_skse->RuntimeVersion().string());
+	logger::info("GroundFog 0.3.1 loading on runtime {}", a_skse->RuntimeVersion().string());
 
 	Settings::Load();
 	if (Settings::enable) {
